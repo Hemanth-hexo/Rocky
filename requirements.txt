@@ -1,0 +1,10 @@
+ollama
+mcp
+faster-whisper
+kokoro-onnx
+openwakeword
+pyaudio
+sounddevice
+soundfile
+numpy
+python-dotenv

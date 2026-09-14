@@ -1,0 +1,16 @@
+venv/
+__pycache__/
+*.pyc
+.env
+
+# large model assets — downloaded/trained locally, not checked in
+*.onnx
+*.bin
+voice/*.onnx
+voice/*.bin
+
+# Rocky's sandboxed scratch space
+sandbox/*
+!sandbox/.gitkeep
+
+.DS_Store
