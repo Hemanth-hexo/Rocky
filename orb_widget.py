@@ -44,6 +44,11 @@ class OrbWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumSize(220, 220)
+        # Paints its own full background every frame (below) instead of
+        # leaving transparent corners around the circle — without this,
+        # Qt has to ask the parent to re-render the (expensive, large)
+        # ambient gradient underneath on every single animation tick.
+        self.setAttribute(Qt.WA_OpaquePaintEvent, True)
         self._state = "idle"
         self._t = 0.0
         self._color = QColor(STATE_COLORS["idle"])
@@ -70,6 +75,10 @@ class OrbWidget(QWidget):
     def paintEvent(self, event) -> None:  # noqa: N802 (Qt naming convention)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+
+        # WA_OpaquePaintEvent above means Qt trusts us to cover the whole
+        # rect ourselves — fill it first so the corners aren't garbage.
+        painter.fillRect(self.rect(), QColor(15, 15, 22))
 
         w, h = self.width(), self.height()
         cx, cy = w / 2, h / 2
