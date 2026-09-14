@@ -1,5 +1,6 @@
 """Rocky's tools — sandboxed to SANDBOX_DIR so a bad command can't touch anything outside it."""
 
+import datetime
 import os
 import subprocess
 
@@ -47,12 +48,40 @@ def run_applescript(script: str) -> str:
     return (result.stdout + result.stderr).strip() or f"(exit {result.returncode})"
 
 
+def get_current_datetime() -> str:
+    return datetime.datetime.now().strftime("%A, %B %d, %Y at %I:%M %p")
+
+
+def play_music(query: str) -> str:
+    """Searches the local Music.app library for `query` and plays the first
+    match. Only finds content actually in the user's library (downloaded/
+    synced tracks) — not the full Apple Music streaming catalog."""
+    safe_query = query.replace("\\", "\\\\").replace('"', '\\"')
+    script = f'''
+    tell application "Music"
+        activate
+        set searchResults to (search playlist "Library" for "{safe_query}")
+        if (count of searchResults) > 0 then
+            play (item 1 of searchResults)
+            return "playing " & (name of item 1 of searchResults) & " by " & (artist of item 1 of searchResults)
+        else
+            return "no match found in the local Music library for \\"{safe_query}\\""
+        end if
+    end tell
+    '''
+    result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=15)
+    output = (result.stdout + result.stderr).strip()
+    return output or f"(exit {result.returncode})"
+
+
 TOOL_FUNCTIONS = {
     "write_file": write_file,
     "read_file": read_file,
     "run_command": run_command,
     "open_app": open_app,
     "run_applescript": run_applescript,
+    "get_current_datetime": get_current_datetime,
+    "play_music": play_music,
 }
 
 TOOL_SCHEMAS = [
@@ -116,6 +145,28 @@ TOOL_SCHEMAS = [
                 "type": "object",
                 "properties": {"script": {"type": "string", "description": "AppleScript source"}},
                 "required": ["script"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_current_datetime",
+            "description": "Get the current real-world date and time.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "play_music",
+            "description": "Search the local Music.app library and play the first matching song. Only finds tracks actually in the user's library, not the full streaming catalog.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Song title and/or artist to search for, e.g. 'Prisoner The Weeknd'"}
+                },
+                "required": ["query"],
             },
         },
     },
