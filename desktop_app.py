@@ -50,16 +50,25 @@ class GradientBackground(QWidget):
         painter.fillRect(self.rect(), _BASE_BG)
 
         w, h = self.width(), self.height()
-        cx, cy = w / 2, h * 0.24
-        glow_radius = h * 0.85
+        cx, cy = w / 2, h * 0.22
+        glow_radius = h * 1.05
 
+        # A 4-stop falloff (hot core -> vivid -> dim -> gone) reads much
+        # richer than a plain 2-stop linear alpha fade, which looked washed
+        # out and barely-there against the dark base.
         gradient = QRadialGradient(QPointF(cx, cy), glow_radius)
-        near = QColor(self._color)
-        near.setAlpha(110)
-        far = QColor(self._color)
-        far.setAlpha(0)
-        gradient.setColorAt(0.0, near)
-        gradient.setColorAt(1.0, far)
+        hot = QColor(self._color)
+        hot.setAlpha(235)
+        vivid = QColor(self._color)
+        vivid.setAlpha(170)
+        dim = QColor(self._color)
+        dim.setAlpha(60)
+        gone = QColor(self._color)
+        gone.setAlpha(0)
+        gradient.setColorAt(0.0, hot)
+        gradient.setColorAt(0.22, vivid)
+        gradient.setColorAt(0.55, dim)
+        gradient.setColorAt(1.0, gone)
 
         painter.setPen(Qt.NoPen)
         painter.setBrush(QBrush(gradient))
@@ -88,18 +97,17 @@ QLabel#statusLabel {
     padding: 6px;
 }
 QTextEdit {
-    background-color: #1e1e2c;
-    border: 1px solid #2f2f45;
-    border-radius: 12px;
+    background: transparent;
+    border: none;
     padding: 10px;
     font-size: 13px;
     selection-background-color: #5865f2;
 }
 QLineEdit {
-    background-color: #1e1e2c;
-    border: 1px solid #2f2f45;
-    border-radius: 10px;
-    padding: 9px 12px;
+    background-color: rgba(30, 30, 44, 190);
+    border: 1px solid rgba(255, 255, 255, 30);
+    border-radius: 20px;
+    padding: 11px 18px;
     font-size: 13px;
 }
 QLineEdit:focus {
@@ -108,8 +116,8 @@ QLineEdit:focus {
 QPushButton {
     background-color: #5865f2;
     border: none;
-    border-radius: 10px;
-    padding: 9px 20px;
+    border-radius: 20px;
+    padding: 11px 22px;
     color: white;
     font-weight: 600;
     font-size: 13px;

@@ -43,7 +43,7 @@ def _lerp_color(c1: QColor, c2: QColor, t: float) -> QColor:
 class OrbWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setMinimumSize(190, 190)
+        self.setMinimumSize(220, 220)
         self._state = "idle"
         self._t = 0.0
         self._color = QColor(STATE_COLORS["idle"])
@@ -73,7 +73,7 @@ class OrbWidget(QWidget):
 
         w, h = self.width(), self.height()
         cx, cy = w / 2, h / 2
-        base_radius = min(w, h) * 0.26
+        base_radius = min(w, h) * 0.34
         color = self._color
 
         # Gentle breathing pulse — subtle on purpose, this is a light touch not a bounce.
