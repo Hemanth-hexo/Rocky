@@ -8,11 +8,12 @@ directly from a background thread isn't safe, the same way AppKit menu
 updates weren't safe in the earlier menu bar version)."""
 
 import html
+import os
 import sys
 import threading
 
 from PySide6.QtCore import QObject, QPointF, Qt, Signal
-from PySide6.QtGui import QBrush, QCloseEvent, QColor, QPainter, QRadialGradient
+from PySide6.QtGui import QBrush, QCloseEvent, QColor, QIcon, QPainter, QPixmap, QRadialGradient
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -29,6 +30,7 @@ from main import handle_turn, new_conversation, run_rocky
 from orb_widget import STATE_COLORS, OrbWidget
 
 _BASE_BG = QColor(15, 15, 22)
+_ROCKY_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "assets", "rocky_figure.png")
 
 
 class GradientBackground(QWidget):
@@ -146,6 +148,9 @@ class RockyWindow(QMainWindow):
         self.resize(480, 700)
         self.setStyleSheet(DARK_STYLESHEET)
 
+        if os.path.exists(_ROCKY_IMAGE_PATH):
+            self.setWindowIcon(QIcon(_ROCKY_IMAGE_PATH))
+
         self.messages = new_conversation()
         self.lock = threading.Lock()
 
@@ -154,6 +159,13 @@ class RockyWindow(QMainWindow):
         layout = QVBoxLayout(central)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(12)
+
+        if os.path.exists(_ROCKY_IMAGE_PATH):
+            figure_label = QLabel()
+            pixmap = QPixmap(_ROCKY_IMAGE_PATH).scaledToWidth(170, Qt.SmoothTransformation)
+            figure_label.setPixmap(pixmap)
+            figure_label.setAlignment(Qt.AlignCenter)
+            layout.addWidget(figure_label)
 
         self.orb = OrbWidget()
         orb_row = QHBoxLayout()
@@ -243,6 +255,8 @@ class RockyWindow(QMainWindow):
 def main() -> None:
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
+    if os.path.exists(_ROCKY_IMAGE_PATH):
+        app.setWindowIcon(QIcon(_ROCKY_IMAGE_PATH))
     window = RockyWindow()
     window.show()
     sys.exit(app.exec())
