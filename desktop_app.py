@@ -157,7 +157,21 @@ class RockyWindow(QMainWindow):
             self.append_chat("Rocky", detail)
 
     def append_chat(self, speaker: str, text: str) -> None:
-        self.chat_log.append(f"<b>{speaker}:</b> {html.escape(text)}")
+        escaped = html.escape(text).replace("\n", "<br>")
+        if speaker == "You":
+            align, bg, fg, label = "right", "#5865f2", "#ffffff", ""
+        else:
+            align, bg, fg, label = "left", "#26263a", "#e4e4f2", '<b style="color:#6bd0c4;">Rocky</b><br>'
+        bubble = f'''
+        <table width="100%" cellspacing="0" style="margin-bottom:8px;"><tr>
+            <td align="{align}">
+                <table cellpadding="9" style="background-color:{bg}; border-radius:14px;">
+                    <tr><td style="color:{fg}; font-size:13px;">{label}{escaped}</td></tr>
+                </table>
+            </td>
+        </tr></table>
+        '''
+        self.chat_log.append(bubble)
 
     def send_typed_text(self) -> None:
         text = self.input_box.text().strip()
