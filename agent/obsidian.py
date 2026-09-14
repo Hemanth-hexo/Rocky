@@ -1,12 +1,15 @@
 """Obsidian note tools, scoped to a single vault — kept separate from the
 general-purpose sandbox tools in tools.py."""
 
+import datetime
 import os
 
 VAULT_DIR = os.environ.get(
     "ROCKY_VAULT_PATH",
     "/Users/hemanthsarode/Hexo's vault/Hexo's Vault",
 )
+
+LOG_DIR = "Rocky Conversations"
 
 
 def _resolve(note_path: str) -> str:
@@ -30,6 +33,24 @@ def write_note(note_path: str, content: str) -> str:
     with open(full, "w") as f:
         f.write(content)
     return f"wrote {len(content)} chars to {note_path}"
+
+
+def append_daily_log(user_text: str, rocky_text: str) -> None:
+    """Auto-logs one conversation turn to today's note — called directly by
+    main.py after every turn, not exposed as an LLM tool, so it happens
+    unconditionally rather than only when the model decides to write a note."""
+    today = datetime.date.today().isoformat()
+    note_path = f"{LOG_DIR}/{today}.md"
+    full = _resolve(note_path)
+    os.makedirs(os.path.dirname(full), exist_ok=True)
+
+    timestamp = datetime.datetime.now().strftime("%H:%M")
+    entry = f"## {timestamp}\n**You:** {user_text}\n**Rocky:** {rocky_text}\n\n"
+
+    if not os.path.exists(full):
+        entry = f"# {today}\n\n" + entry
+    with open(full, "a") as f:
+        f.write(entry)
 
 
 def list_notes(subdir: str = "") -> str:

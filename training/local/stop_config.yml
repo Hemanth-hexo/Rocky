@@ -1,0 +1,41 @@
+model_name: "stop"
+target_phrase:
+  - "stop"
+custom_negative_phrases: []
+
+n_samples: 1000
+n_samples_val: 1000
+tts_batch_size: 50
+augmentation_batch_size: 16
+piper_sample_generator_path: "./piper-sample-generator"
+
+output_dir: "./my_custom_model"
+
+rir_paths:
+  - "./data/mit_rirs"
+
+background_paths:
+  - "./data/audioset_16k"
+background_paths_duplication_rate:
+  - 1
+
+false_positive_validation_data_path: "./data/validation_set_features.npy"
+
+augmentation_rounds: 1
+
+feature_data_files:
+  "ACAV100M_sample": "./data/openwakeword_features_ACAV100M_2000_hrs_16bit.npy"
+
+batch_n_per_class:
+  "ACAV100M_sample": 1024
+  "adversarial_negative": 50
+  "positive": 50
+
+model_type: "dnn"
+layer_size: 32
+
+steps: 10000
+max_negative_weight: 1500
+target_false_positives_per_hour: 0.2
+target_accuracy: 0.6
+target_recall: 0.25

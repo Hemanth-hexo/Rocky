@@ -8,3 +8,5 @@ sounddevice
 soundfile
 numpy
 python-dotenv
+PySide6
+librosa

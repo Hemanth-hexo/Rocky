@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.rocky.desktopapp</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Users/hemanthsarode/Desktop/PROJECTS/Rocky/venv/bin/python3</string>
+		<string>/Users/hemanthsarode/Desktop/PROJECTS/Rocky/desktop_app.py</string>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>/Users/hemanthsarode/Desktop/PROJECTS/Rocky</string>
+	<key>RunAtLoad</key>
+	<false/>
+	<key>KeepAlive</key>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+	<key>LimitLoadToSessionType</key>
+	<array>
+		<string>Aqua</string>
+	</array>
+	<key>StandardOutPath</key>
+	<string>/Users/hemanthsarode/Desktop/PROJECTS/Rocky/rocky.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/hemanthsarode/Desktop/PROJECTS/Rocky/rocky.log</string>
+</dict>
+</plist>

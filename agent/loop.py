@@ -25,17 +25,23 @@ def load_system_prompt() -> str:
 def _parse_loose_tool_call(content: str) -> dict | None:
     """qwen2.5-coder:7b-q4_K_M sometimes emits a bare {"name":..,"arguments":..}
     JSON object as plain content instead of wrapping it in <tool_call> tags, so
-    ollama's parser never populates tool_calls. Catch that case manually."""
+    ollama's parser never populates tool_calls. Catch that case manually.
+
+    It also sometimes wraps the JSON in conversational text ("Sure thing!
+    Let's do this.\n\n{...}") rather than emitting pure JSON, so this scans
+    for a {...} substring anywhere in the content rather than requiring the
+    whole message to be just the JSON object."""
     if not content:
         return None
     text = content.strip()
-    for tag in ("<tool_call>", "</tool_call>"):
+    for tag in ("<tool_call>", "</tool_call>", "```json", "```"):
         text = text.replace(tag, "")
-    text = text.strip()
-    if not (text.startswith("{") and text.endswith("}")):
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
         return None
     try:
-        obj = json.loads(text)
+        obj = json.loads(text[start : end + 1])
     except json.JSONDecodeError:
         return None
     if isinstance(obj, dict) and "name" in obj and "arguments" in obj and obj["name"] in ALL_FUNCTIONS:

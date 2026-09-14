@@ -9,8 +9,29 @@ __pycache__/
 voice/*.onnx
 voice/*.bin
 
+# ...except the trained wake-word model itself (small, and worth keeping in git)
+!voice/rocky_wakeword.onnx
+!voice/rocky.onnx.data
+!voice/stop_wakeword.onnx
+!voice/stop.onnx.data
+
 # Rocky's sandboxed scratch space
 sandbox/*
 !sandbox/.gitkeep
+
+# generated wake-word training clips (regenerate with training/generate_*_clips.py)
+training/rocky_clips/
+training/rocky_clips.zip
+training/stop_clips/
+training/stop_clips.zip
+
+# voice audition samples generated during development, not needed to run/build Rocky
+training/voice_samples/
+
+# local training run: downloaded datasets + generated model artifacts
+training/local/data/
+training/local/my_custom_model/
+
+rocky.log
 
 .DS_Store

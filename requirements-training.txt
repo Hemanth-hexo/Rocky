@@ -1,0 +1,19 @@
+# Only needed to retrain the custom "Rocky"/"stop" wake-word models
+# (training/local/*.py) — not required to run Rocky itself.
+# torch/torchaudio installed from the CPU index to get Apple Silicon MPS
+# support without pulling in CUDA-specific packages:
+#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+torchcodec
+onnxscript
+scipy
+torchinfo
+torchmetrics
+speechbrain
+audiomentations
+torch_audiomentations
+acoustics
+pronouncing
+mutagen
+datasets
+requests
+tqdm
