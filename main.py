@@ -2,6 +2,7 @@
 
 import tempfile
 import threading
+import time
 from typing import Callable, Optional
 
 import numpy as np
@@ -20,31 +21,55 @@ from voice.speak import speak
 
 SAMPLE_RATE = 16000
 
+# Option+Control are common modifier keys — briefly, accidentally holding
+# both together (e.g. while typing another shortcut) can trigger a
+# recording nobody meant to start. Combined with faster-whisper's tendency
+# to hallucinate plausible-sounding text from near-silent audio, that
+# produced Rocky responding to "messages" the user never said. Both guards
+# below exist specifically to kill that.
+MIN_HOLD_SECONDS = 0.25
+SILENCE_RMS_THRESHOLD = 150  # int16 scale; real speech sits well above this
+
 StatusCallback = Callable[[str, str], None]
 
 
 class _Recorder:
-    """Records audio via a sounddevice InputStream until stop_and_save() is
-    called — unlike a fixed-duration recording, this runs for exactly as
-    long as the hotkey is held."""
+    """Records audio via a sounddevice InputStream until stop() is called —
+    unlike a fixed-duration recording, this runs for exactly as long as the
+    hotkey is held."""
 
     def __init__(self):
         self._frames: list[np.ndarray] = []
         self._stream = sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16", callback=self._callback)
+        self._started_at = 0.0
 
     def _callback(self, indata, frame_count, time_info, status) -> None:
         self._frames.append(indata.copy())
 
     def start(self) -> None:
+        self._started_at = time.monotonic()
         self._stream.start()
 
-    def stop_and_save(self) -> str:
+    def stop(self) -> np.ndarray:
         self._stream.stop()
         self._stream.close()
-        audio = np.concatenate(self._frames, axis=0) if self._frames else np.zeros((0, 1), dtype=np.int16)
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-            sf.write(f.name, audio, SAMPLE_RATE)
-            return f.name
+        return np.concatenate(self._frames, axis=0) if self._frames else np.zeros((0, 1), dtype=np.int16)
+
+    def held_seconds(self) -> float:
+        return time.monotonic() - self._started_at
+
+
+def _save_wav(audio: np.ndarray) -> str:
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+        sf.write(f.name, audio, SAMPLE_RATE)
+        return f.name
+
+
+def _is_silent(audio: np.ndarray) -> bool:
+    if audio.size == 0:
+        return True
+    rms = float(np.sqrt(np.mean(audio.astype(np.float64) ** 2)))
+    return rms < SILENCE_RMS_THRESHOLD
 
 
 def handle_turn(
@@ -116,16 +141,30 @@ def run_rocky(on_status: StatusCallback, messages: Optional[list] = None, lock: 
             active_recorder, recorder = recorder, None
         if active_recorder is None:
             return
-        audio_path = active_recorder.stop_and_save()
-        on_status("transcribing", "")
+        # A very short hold is almost always accidental modifier-key overlap
+        # from typing/other shortcuts, not an intentional talk gesture —
+        # discard it before even touching the audio.
+        if active_recorder.held_seconds() < MIN_HOLD_SECONDS:
+            active_recorder.stop()
+            on_status("idle", "")
+            return
+        audio = active_recorder.stop()
         # transcribe() alone can take a second or more — must not run on the
         # hotkey callback thread. macOS silently disables a global key-event
         # tap if its callback doesn't return quickly (no error, no crash —
         # just stops delivering events), which is exactly what "worked for a
         # while, then stopped working" looks like.
-        threading.Thread(target=_transcribe_and_process, args=(audio_path,), daemon=True).start()
+        threading.Thread(target=_transcribe_and_process, args=(audio,), daemon=True).start()
 
-    def _transcribe_and_process(audio_path: str) -> None:
+    def _transcribe_and_process(audio: np.ndarray) -> None:
+        # faster-whisper reliably hallucinates plausible-sounding text from
+        # near-silent audio — reject it here before it ever reaches Whisper,
+        # rather than trying to filter its output after the fact.
+        if _is_silent(audio):
+            on_status("idle", "")
+            return
+        on_status("transcribing", "")
+        audio_path = _save_wav(audio)
         text = transcribe(audio_path)
         if not text.strip():
             on_status("idle", "")

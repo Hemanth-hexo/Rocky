@@ -13,7 +13,7 @@ import sys
 import threading
 
 from PySide6.QtCore import QObject, QPointF, Qt, Signal
-from PySide6.QtGui import QBrush, QCloseEvent, QColor, QIcon, QPainter, QPixmap, QRadialGradient
+from PySide6.QtGui import QBrush, QCloseEvent, QColor, QIcon, QPainter, QRadialGradient
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -159,13 +159,6 @@ class RockyWindow(QMainWindow):
         layout = QVBoxLayout(central)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(12)
-
-        if os.path.exists(_ROCKY_IMAGE_PATH):
-            figure_label = QLabel()
-            pixmap = QPixmap(_ROCKY_IMAGE_PATH).scaledToWidth(170, Qt.SmoothTransformation)
-            figure_label.setPixmap(pixmap)
-            figure_label.setAlignment(Qt.AlignCenter)
-            layout.addWidget(figure_label)
 
         self.orb = OrbWidget()
         orb_row = QHBoxLayout()
