@@ -11,8 +11,8 @@ import html
 import sys
 import threading
 
-from PySide6.QtCore import QObject, Qt, Signal
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtCore import QObject, QPointF, Qt, Signal
+from PySide6.QtGui import QBrush, QCloseEvent, QColor, QPainter, QRadialGradient
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -26,7 +26,44 @@ from PySide6.QtWidgets import (
 )
 
 from main import handle_turn, new_conversation, run_rocky
-from orb_widget import OrbWidget
+from orb_widget import STATE_COLORS, OrbWidget
+
+_BASE_BG = QColor(15, 15, 22)
+
+
+class GradientBackground(QWidget):
+    """Paints one bold ambient glow behind everything, anchored near where
+    the orb sits, matching the reference look — no per-frame animation here
+    (only repaints on a state/color change), so it costs almost nothing."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._color = QColor(STATE_COLORS["idle"])
+
+    def set_color(self, color: QColor) -> None:
+        if self._color != color:
+            self._color = color
+            self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), _BASE_BG)
+
+        w, h = self.width(), self.height()
+        cx, cy = w / 2, h * 0.24
+        glow_radius = h * 0.85
+
+        gradient = QRadialGradient(QPointF(cx, cy), glow_radius)
+        near = QColor(self._color)
+        near.setAlpha(110)
+        far = QColor(self._color)
+        far.setAlpha(0)
+        gradient.setColorAt(0.0, near)
+        gradient.setColorAt(1.0, far)
+
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(gradient))
+        painter.drawEllipse(QPointF(cx, cy), glow_radius, glow_radius)
 
 STATUS_LABELS = {
     "idle": "Hold ⌥ Option + ⌃ Control to talk",
@@ -38,8 +75,10 @@ STATUS_LABELS = {
 }
 
 DARK_STYLESHEET = """
-QMainWindow, QWidget {
-    background-color: #16161f;
+QMainWindow {
+    background-color: #0f0f16;
+}
+QWidget {
     color: #e4e4f2;
 }
 QLabel#statusLabel {
@@ -102,7 +141,8 @@ class RockyWindow(QMainWindow):
         self.messages = new_conversation()
         self.lock = threading.Lock()
 
-        central = QWidget()
+        central = GradientBackground()
+        self.background = central
         layout = QVBoxLayout(central)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(12)
@@ -151,6 +191,7 @@ class RockyWindow(QMainWindow):
     def on_status_changed(self, state: str, detail: str) -> None:
         self.status_label.setText(STATUS_LABELS.get(state, state))
         self.orb.set_state(state)
+        self.background.set_color(STATE_COLORS.get(state, STATE_COLORS["idle"]))
         if state == "heard_command":
             self.append_chat("You", detail)
         elif state == "speaking":
@@ -161,7 +202,7 @@ class RockyWindow(QMainWindow):
         if speaker == "You":
             align, bg, fg, label = "right", "#5865f2", "#ffffff", ""
         else:
-            align, bg, fg, label = "left", "#26263a", "#e4e4f2", '<b style="color:#6bd0c4;">Rocky</b><br>'
+            align, bg, fg, label = "left", "#22283a", "#e4e4f2", '<b style="color:#38bdf8;">Rocky</b><br>'
         bubble = f'''
         <table width="100%" cellspacing="0" style="margin-bottom:8px;"><tr>
             <td align="{align}">
