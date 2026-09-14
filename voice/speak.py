@@ -64,22 +64,18 @@ def _get_kokoro() -> Kokoro:
     return _kokoro
 
 
-def speak(text: str, voice: str = DEFAULT_VOICE, interruptible: bool = False) -> bool:
+def speak(text: str, voice: str = DEFAULT_VOICE, interrupt_event: threading.Event | None = None) -> bool:
     """Speaks `text` aloud. Returns True if playback completed normally,
-    False if it was interrupted partway through (barge-in — see below).
+    False if `interrupt_event` was set partway through (barge-in).
 
     Plays via a temp WAV file + macOS's `afplay` rather than streaming the
     raw array through sounddevice directly — sounddevice underrunning its
     buffer for irregularly-sized TTS output was causing audible crackling;
     afplay's own buffering through CoreAudio is more robust.
 
-    When `interruptible` is True, also listens for the wake word while
-    playing and stops immediately if it's heard — so saying "Rocky" mid-reply
-    cuts Rocky off instead of waiting for it to finish. Note: this listens
-    through the same mic while Rocky's own voice is playing through the
-    speakers, so it *can* self-trigger if a reply happens to say "Rocky" —
-    see rocky_prompt.txt's rule against Rocky naming itself, which exists
-    specifically to reduce that.
+    `interrupt_event` decouples "how playback gets interrupted" from this
+    function — pass a threading.Event that some other mechanism (the
+    push-to-talk hotkey, in main.py) sets to cut playback off immediately.
     """
     samples, sample_rate = _get_kokoro().create(text, voice=voice, speed=1.0, lang="en-us")
     if ROBOT_EFFECT_ENABLED:
@@ -91,28 +87,16 @@ def speak(text: str, voice: str = DEFAULT_VOICE, interruptible: bool = False) ->
 
     try:
         proc = subprocess.Popen(["afplay", wav_path])
-        interrupted = False
+        if interrupt_event is None:
+            proc.wait()
+            return True
 
-        listener_thread = None
-        stop_listener = threading.Event()
-        if interruptible:
-            from voice.wake_word import listen_for_wake_word_until
-
-            def _on_detected():
-                nonlocal interrupted
-                interrupted = True
+        while proc.poll() is None:
+            if interrupt_event.is_set():
                 proc.terminate()
-
-            listener_thread = threading.Thread(
-                target=listen_for_wake_word_until, args=(stop_listener, _on_detected), daemon=True
-            )
-            listener_thread.start()
-
-        proc.wait()
-        stop_listener.set()
-        if listener_thread is not None:
-            listener_thread.join(timeout=1)
-
-        return not interrupted
+                proc.wait()
+                return False
+            time.sleep(0.05)
+        return not interrupt_event.is_set()
     finally:
         os.remove(wav_path)
