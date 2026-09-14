@@ -97,14 +97,14 @@ QLabel#statusLabel {
     padding: 6px;
 }
 QTextEdit {
-    background: transparent;
+    background-color: #0f0f16;
     border: none;
     padding: 10px;
     font-size: 13px;
     selection-background-color: #5865f2;
 }
 QLineEdit {
-    background-color: rgba(30, 30, 44, 190);
+    background-color: #1e1e2c;
     border: 1px solid rgba(255, 255, 255, 30);
     border-radius: 20px;
     padding: 11px 18px;
