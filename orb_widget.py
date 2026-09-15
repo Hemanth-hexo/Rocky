@@ -117,12 +117,16 @@ class OrbWidget(QWidget):
 
 class ParticleOrbWidget(QWidget):
     """"Thinking orb" style prototype — a sparse dot-particle sphere,
-    slowly rotating, inspired by libraries.dev's thinking-orbs component.
+    inspired by libraries.dev's thinking-orbs component. Always visible;
+    sits still while idle and spins while anything is actively happening
+    (listening/transcribing/thinking/speaking) — set_state() decides which
+    from the state name alone ("idle" pauses, anything else spins).
+
     Kept cheap on purpose (unlike the earlier particle-based orb that got
     dropped for lag): a fixed set of points computed ONCE at construction
     (Fibonacci sphere — even coverage, no per-frame random sampling), then
-    just rotated and redrawn as flat dots every frame. No per-particle
-    gradients, no dynamic point count.
+    just rotated and redrawn as flat dots every frame it's actually
+    spinning. No per-particle gradients, no dynamic point count.
 
     Transparent by design — no background fill, just the dots — which only
     works cheaply because it sits on the new flat, statically-painted page
@@ -137,8 +141,9 @@ class ParticleOrbWidget(QWidget):
         super().__init__(parent)
         self.setFixedSize(size, size)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self._state = "recording"
-        self._color = QColor(STATE_COLORS["recording"])
+        self._state = "idle"
+        self._color = QColor(STATE_COLORS["idle"])
+        self._spinning = False
         self._angle = 0.0
         # Dot count doesn't scale down with area at small sizes — a truly
         # proportional count would leave almost nothing visible at icon
@@ -163,10 +168,16 @@ class ParticleOrbWidget(QWidget):
         return points
 
     def set_state(self, state: str) -> None:
-        self._state = state if state in STATE_COLORS else "recording"
+        self._state = state if state in STATE_COLORS else "idle"
         self._color = QColor(STATE_COLORS[self._state])
+        self._spinning = self._state != "idle"
 
     def _tick(self) -> None:
+        # Paused (no repaint at all, not just a frozen angle) while idle —
+        # the orb is visible at all times now, so this is what keeps it
+        # from burning a frame budget for the majority of the app's runtime.
+        if not self._spinning:
+            return
         self._angle += self._ROTATE_SPEED * (_FRAME_MS / 1000.0)
         self.update()
 

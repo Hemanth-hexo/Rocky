@@ -69,9 +69,6 @@ STATUS_LABELS = {
     "speaking": "Speaking…",
 }
 
-# States that warrant the larger orb — active voice input, not idle chat.
-_VOICE_STATES = {"recording", "transcribing"}
-
 DARK_STYLESHEET = f"""
 QMainWindow {{
     background-color: {BG};
@@ -242,7 +239,6 @@ class ChatPage(QWidget):
         status_row = QHBoxLayout()
         status_row.setSpacing(6)
         self.voice_orb = ParticleOrbWidget(size=32, particle_count=70)
-        self.voice_orb.hide()
         status_row.addWidget(self.voice_orb)
         self.status_pill = QLabel(STATUS_LABELS["idle"])
         self.status_pill.setObjectName("statusPill")
@@ -268,8 +264,10 @@ class ChatPage(QWidget):
         layout.addWidget(composer_bar)
 
     def set_state(self, state: str, color) -> None:
+        # Always visible now — it sits still while idle and spins for
+        # everything else (ParticleOrbWidget.set_state decides that itself
+        # from the state name).
         self.voice_orb.set_state(state)
-        self.voice_orb.setVisible(state in _VOICE_STATES)
         dot = f'<span style="color:{color.name()};">●</span>'
         self.status_pill.setText(f"{dot} {STATUS_LABELS.get(state, state)}")
 
