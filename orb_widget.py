@@ -133,14 +133,17 @@ class ParticleOrbWidget(QWidget):
     _ROTATE_SPEED = 0.55  # radians/sec
     _DOT_RADIUS = 1.15  # small and uniform — pixel-like dots, not tiny balls
 
-    def __init__(self, parent=None, size: int = 120):
+    def __init__(self, parent=None, size: int = 120, particle_count: int | None = None):
         super().__init__(parent)
         self.setFixedSize(size, size)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self._state = "recording"
         self._color = QColor(STATE_COLORS["recording"])
         self._angle = 0.0
-        self._points = self._make_sphere_points(self._PARTICLE_COUNT)
+        # Dot count doesn't scale down with area at small sizes — a truly
+        # proportional count would leave almost nothing visible at icon
+        # size, so callers pick a count that still reads as a dot cluster.
+        self._points = self._make_sphere_points(particle_count or self._PARTICLE_COUNT)
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
         self._timer.start(_FRAME_MS)

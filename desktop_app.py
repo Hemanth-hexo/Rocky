@@ -217,33 +217,14 @@ def _separator() -> QFrame:
 
 class ChatPage(QWidget):
     """The default view: a flat, ChatGPT-style message list plus a compact
-    composer. The large orb only appears here, and only while actively
-    recording/transcribing — everything else uses the small status pill."""
+    composer. The dot-particle orb sits inline next to the status text,
+    small, and only while actively recording/transcribing."""
 
     def __init__(self, on_send, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-
-        # Voice overlay: collapses to nothing (no reserved space) outside
-        # recording/transcribing — this is the "larger orb only for voice
-        # mode" behavior, everything else stays compact and text-first.
-        self.voice_overlay = QWidget()
-        overlay_layout = QVBoxLayout(self.voice_overlay)
-        overlay_layout.setContentsMargins(0, 20, 0, 12)
-        overlay_layout.setSpacing(8)
-        # Prototype: the sparse dot-particle "thinking orb" look, used only
-        # for the active voice-listening state. The always-visible small
-        # brand orb (sidebar header) stays the glossy sphere for now.
-        self.voice_orb = ParticleOrbWidget(size=120)
-        orb_row = QHBoxLayout()
-        orb_row.addStretch()
-        orb_row.addWidget(self.voice_orb)
-        orb_row.addStretch()
-        overlay_layout.addLayout(orb_row)
-        self.voice_overlay.hide()
-        layout.addWidget(self.voice_overlay)
 
         self.chat_log = QTextEdit()
         self.chat_log.setReadOnly(True)
@@ -255,10 +236,20 @@ class ChatPage(QWidget):
         composer_layout.setContentsMargins(16, 10, 16, 14)
         composer_layout.setSpacing(6)
 
+        # Sits right next to the status text, only while actively
+        # recording/transcribing — small and inline instead of a large
+        # overlay above the chat log.
+        status_row = QHBoxLayout()
+        status_row.setSpacing(6)
+        self.voice_orb = ParticleOrbWidget(size=32, particle_count=70)
+        self.voice_orb.hide()
+        status_row.addWidget(self.voice_orb)
         self.status_pill = QLabel(STATUS_LABELS["idle"])
         self.status_pill.setObjectName("statusPill")
         self.status_pill.setStyleSheet("border-top: none; padding: 0px;")
-        composer_layout.addWidget(self.status_pill)
+        status_row.addWidget(self.status_pill)
+        status_row.addStretch()
+        composer_layout.addLayout(status_row)
 
         input_row = QHBoxLayout()
         input_row.setSpacing(8)
@@ -278,7 +269,7 @@ class ChatPage(QWidget):
 
     def set_state(self, state: str, color) -> None:
         self.voice_orb.set_state(state)
-        self.voice_overlay.setVisible(state in _VOICE_STATES)
+        self.voice_orb.setVisible(state in _VOICE_STATES)
         dot = f'<span style="color:{color.name()};">●</span>'
         self.status_pill.setText(f"{dot} {STATUS_LABELS.get(state, state)}")
 
