@@ -19,6 +19,9 @@ voice/*.bin
 sandbox/*
 !sandbox/.gitkeep
 
+# runtime state (e.g. last-greeted date) — machine-local, not checked in
+state/
+
 # generated wake-word training clips (regenerate with training/generate_*_clips.py)
 training/rocky_clips/
 training/rocky_clips.zip

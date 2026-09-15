@@ -23,6 +23,8 @@ _MODIFIER_ALIASES = {
 }
 _HOTKEY = {"alt", "ctrl"}
 
+HOTKEY_LABEL = "⌥⌃ Option+Control"
+
 
 class PushToTalkListener:
     """on_press() fires once when both Option and Control are held together;

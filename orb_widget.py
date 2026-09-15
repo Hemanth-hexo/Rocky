@@ -41,9 +41,9 @@ def _lerp_color(c1: QColor, c2: QColor, t: float) -> QColor:
 
 
 class OrbWidget(QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, size: int = 220):
         super().__init__(parent)
-        self.setMinimumSize(220, 220)
+        self.setFixedSize(size, size)
         # Paints its own full background every frame (below) instead of
         # leaving transparent corners around the circle — without this,
         # Qt has to ask the parent to re-render the (expensive, large)
@@ -108,7 +108,8 @@ class OrbWidget(QWidget):
         painter.setBrush(QBrush(highlight))
         painter.drawEllipse(QPointF(hl_cx, hl_cy), radius * 0.42, radius * 0.34)
 
-        # Thin dark rim for definition against the ambient glow behind it.
-        painter.setPen(QPen(color.darker(260), 1.4))
+        # Thin dark rim for definition against the ambient glow behind it —
+        # scaled down for the small sidebar-brand size, or it reads as a bezel.
+        painter.setPen(QPen(color.darker(260), max(1.0, radius * 0.03)))
         painter.setBrush(Qt.NoBrush)
         painter.drawEllipse(QPointF(cx, cy), radius, radius)

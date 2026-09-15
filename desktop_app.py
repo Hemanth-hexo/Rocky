@@ -1,5 +1,6 @@
-"""Rocky as a desktop app with a real window: an animated status orb, chat
-history, and a text box to type instead of speaking.
+"""Rocky as a desktop app: a Raycast-style sidebar (Chat / Projects / Tools /
+Memory / Settings), a flat ChatGPT-style conversation view, and a compact
+composer to type instead of speaking.
 
 The push-to-talk loop (main.run_rocky) runs on a background thread; this
 window shares its conversation state with typed input via a lock, and uses
@@ -12,140 +13,431 @@ import os
 import sys
 import threading
 
-from PySide6.QtCore import QObject, QPointF, Qt, Signal
-from PySide6.QtGui import QBrush, QCloseEvent, QColor, QIcon, QPainter, QRadialGradient
+from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtGui import QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
+    QButtonGroup,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QPushButton,
+    QSizePolicy,
+    QStackedWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
+from agent.greeting import generate_greeting, greeting_due, mark_greeted
+from agent.loop import ALL_SCHEMAS, MODEL
+from agent.obsidian import LOG_DIR, VAULT_DIR, append_daily_log, list_notes, read_note
+from agent.rocky_transform import rocky_transform
 from main import handle_turn, new_conversation, run_rocky
 from orb_widget import STATE_COLORS, OrbWidget
+from voice.push_to_talk import HOTKEY_LABEL
+from voice.speak import DEFAULT_VOICE, speak
 
-_BASE_BG = QColor(15, 15, 22)
 _ROCKY_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "assets", "rocky_figure.png")
 
+# Raycast-inspired dark palette: flat surfaces, thin low-contrast borders,
+# a single restrained accent — no big gradients or glass panels.
+BG = "#18181b"
+BG_SIDEBAR = "#141416"
+BG_ELEVATED = "#1e1e22"
+BG_COMPOSER = "#202024"
+BORDER = "rgba(255, 255, 255, 0.08)"
+BORDER_STRONG = "rgba(255, 255, 255, 0.14)"
+TEXT = "#e6e6eb"
+TEXT_MUTED = "#8b8b95"
+TEXT_FAINT = "#5c5c66"
+ACCENT = "#5b6eff"
+ACCENT_SOFT = "rgba(91, 110, 255, 0.14)"
 
-class GradientBackground(QWidget):
-    """Paints one bold ambient glow behind everything, anchored near where
-    the orb sits, matching the reference look — no per-frame animation here
-    (only repaints on a state/color change), so it costs almost nothing."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._color = QColor(STATE_COLORS["idle"])
-
-    def set_color(self, color: QColor) -> None:
-        if self._color != color:
-            self._color = color
-            self.update()
-
-    def paintEvent(self, event) -> None:  # noqa: N802
-        painter = QPainter(self)
-        painter.fillRect(self.rect(), _BASE_BG)
-
-        w, h = self.width(), self.height()
-        cx, cy = w / 2, h * 0.22
-        glow_radius = h * 1.05
-
-        # A 4-stop falloff (hot core -> vivid -> dim -> gone) reads much
-        # richer than a plain 2-stop linear alpha fade, which looked washed
-        # out and barely-there against the dark base.
-        gradient = QRadialGradient(QPointF(cx, cy), glow_radius)
-        hot = QColor(self._color)
-        hot.setAlpha(235)
-        vivid = QColor(self._color)
-        vivid.setAlpha(170)
-        dim = QColor(self._color)
-        dim.setAlpha(60)
-        gone = QColor(self._color)
-        gone.setAlpha(0)
-        gradient.setColorAt(0.0, hot)
-        gradient.setColorAt(0.22, vivid)
-        gradient.setColorAt(0.55, dim)
-        gradient.setColorAt(1.0, gone)
-
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QBrush(gradient))
-        painter.drawEllipse(QPointF(cx, cy), glow_radius, glow_radius)
+NAV_ITEMS = ["Chat", "Projects", "Tools", "Memory", "Settings"]
 
 STATUS_LABELS = {
-    "idle": "Hold ⌥ Option + ⌃ Control to talk",
-    "recording": "🎙️ Recording — release to send",
-    "transcribing": "👂 Heard you! Transcribing...",
-    "heard_command": "🤔 Thinking...",
-    "thinking": "🤔 Thinking...",
-    "speaking": "💬 Speaking...",
+    "idle": f"Hold {HOTKEY_LABEL} to talk",
+    "recording": "Listening…",
+    "transcribing": "Transcribing…",
+    "heard_command": "Thinking…",
+    "thinking": "Thinking…",
+    "speaking": "Speaking…",
 }
 
-DARK_STYLESHEET = """
-QMainWindow {
-    background-color: #0f0f16;
-}
-QWidget {
-    color: #e4e4f2;
-}
-QLabel#statusLabel {
-    font-size: 14px;
+# States that warrant the larger orb — active voice input, not idle chat.
+_VOICE_STATES = {"recording", "transcribing"}
+
+DARK_STYLESHEET = f"""
+QMainWindow {{
+    background-color: {BG};
+}}
+QWidget {{
+    color: {TEXT};
+    font-size: 13px;
+}}
+#sidebar {{
+    background-color: {BG_SIDEBAR};
+    border-right: 1px solid {BORDER};
+}}
+#sidebarHeader {{
+    border-bottom: 1px solid {BORDER};
+}}
+#brandLabel {{
+    font-size: 13px;
     font-weight: 600;
-    color: #9d9dc4;
-    padding: 6px;
-}
-QTextEdit {
-    background-color: #0f0f16;
+    color: {TEXT};
+}}
+QPushButton#navButton {{
+    background-color: transparent;
     border: none;
-    padding: 10px;
+    border-left: 2px solid transparent;
+    border-radius: 0px;
+    text-align: left;
+    padding: 8px 16px;
+    color: {TEXT_MUTED};
     font-size: 13px;
-    selection-background-color: #5865f2;
-}
-QLineEdit {
-    background-color: #1e1e2c;
-    border: 1px solid rgba(255, 255, 255, 30);
-    border-radius: 20px;
-    padding: 11px 18px;
-    font-size: 13px;
-}
-QLineEdit:focus {
-    border: 1px solid #5865f2;
-}
-QPushButton {
-    background-color: #5865f2;
+    font-weight: 500;
+}}
+QPushButton#navButton:hover {{
+    background-color: rgba(255, 255, 255, 0.04);
+    color: {TEXT};
+}}
+QPushButton#navButton:checked {{
+    background-color: {ACCENT_SOFT};
+    border-left: 2px solid {ACCENT};
+    color: {TEXT};
+}}
+#statusPill {{
+    color: {TEXT_MUTED};
+    font-size: 12px;
+    padding: 10px 16px;
+    border-top: 1px solid {BORDER};
+}}
+QTextEdit {{
+    background-color: {BG};
     border: none;
-    border-radius: 20px;
-    padding: 11px 22px;
+    padding: 4px 16px;
+    font-size: 13px;
+    selection-background-color: {ACCENT};
+}}
+QTextEdit#infoPane {{
+    background-color: {BG_ELEVATED};
+    border: 1px solid {BORDER};
+    border-radius: 8px;
+    padding: 14px;
+}}
+QListWidget {{
+    background-color: transparent;
+    border: none;
+    outline: none;
+    font-size: 13px;
+}}
+QListWidget::item {{
+    padding: 7px 10px;
+    border-radius: 6px;
+    color: {TEXT_MUTED};
+}}
+QListWidget::item:selected {{
+    background-color: {ACCENT_SOFT};
+    color: {TEXT};
+}}
+QListWidget::item:hover {{
+    background-color: rgba(255, 255, 255, 0.04);
+}}
+#composerBar {{
+    background-color: {BG};
+    border-top: 1px solid {BORDER};
+}}
+QLineEdit#composerInput {{
+    background-color: {BG_COMPOSER};
+    border: 1px solid {BORDER_STRONG};
+    border-radius: 8px;
+    padding: 9px 12px;
+    font-size: 13px;
+    color: {TEXT};
+}}
+QLineEdit#composerInput:focus {{
+    border: 1px solid {ACCENT};
+}}
+QPushButton#sendButton {{
+    background-color: {ACCENT};
+    border: none;
+    border-radius: 8px;
+    padding: 9px 16px;
     color: white;
     font-weight: 600;
     font-size: 13px;
-}
-QPushButton:hover {
-    background-color: #6b76ff;
-}
-QPushButton:pressed {
-    background-color: #4952d1;
-}
+}}
+QPushButton#sendButton:hover {{
+    background-color: #6b7cff;
+}}
+QPushButton#sendButton:pressed {{
+    background-color: #4a5adf;
+}}
+#pageTitle {{
+    font-size: 13px;
+    font-weight: 600;
+    color: {TEXT};
+    padding: 14px 16px 6px 16px;
+}}
+#emptyState {{
+    color: {TEXT_FAINT};
+    font-size: 13px;
+}}
 """
 
 
 class Bridge(QObject):
-    """Qt signals are thread-safe: emitting one from the background voice
-    thread queues its connected slot to run on the GUI thread instead of
-    executing it inline on whichever thread emitted it."""
+    """Qt signals are thread-safe: emitting one from a background thread
+    queues its connected slot to run on the GUI thread instead of executing
+    it inline on whichever thread emitted it."""
 
     status_changed = Signal(str, str)
+
+
+def _nav_button(label: str) -> QPushButton:
+    btn = QPushButton(label)
+    btn.setObjectName("navButton")
+    btn.setCheckable(True)
+    btn.setCursor(Qt.PointingHandCursor)
+    return btn
+
+
+def _separator() -> QFrame:
+    line = QFrame()
+    line.setFrameShape(QFrame.HLine)
+    line.setStyleSheet(f"color: {BORDER}; background-color: {BORDER}; max-height: 1px; border: none;")
+    return line
+
+
+class ChatPage(QWidget):
+    """The default view: a flat, ChatGPT-style message list plus a compact
+    composer. The large orb only appears here, and only while actively
+    recording/transcribing — everything else uses the small status pill."""
+
+    def __init__(self, on_send, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Voice overlay: collapses to nothing (no reserved space) outside
+        # recording/transcribing — this is the "larger orb only for voice
+        # mode" behavior, everything else stays compact and text-first.
+        self.voice_overlay = QWidget()
+        overlay_layout = QVBoxLayout(self.voice_overlay)
+        overlay_layout.setContentsMargins(0, 20, 0, 12)
+        overlay_layout.setSpacing(8)
+        self.voice_orb = OrbWidget(size=120)
+        orb_row = QHBoxLayout()
+        orb_row.addStretch()
+        orb_row.addWidget(self.voice_orb)
+        orb_row.addStretch()
+        overlay_layout.addLayout(orb_row)
+        self.voice_overlay.hide()
+        layout.addWidget(self.voice_overlay)
+
+        self.chat_log = QTextEdit()
+        self.chat_log.setReadOnly(True)
+        layout.addWidget(self.chat_log, 1)
+
+        composer_bar = QWidget()
+        composer_bar.setObjectName("composerBar")
+        composer_layout = QVBoxLayout(composer_bar)
+        composer_layout.setContentsMargins(16, 10, 16, 14)
+        composer_layout.setSpacing(6)
+
+        self.status_pill = QLabel(STATUS_LABELS["idle"])
+        self.status_pill.setObjectName("statusPill")
+        self.status_pill.setStyleSheet("border-top: none; padding: 0px;")
+        composer_layout.addWidget(self.status_pill)
+
+        input_row = QHBoxLayout()
+        input_row.setSpacing(8)
+        self.input_box = QLineEdit()
+        self.input_box.setObjectName("composerInput")
+        self.input_box.setPlaceholderText("Message Rocky, or hold the hotkey to talk…")
+        self.input_box.returnPressed.connect(on_send)
+        send_button = QPushButton("Send")
+        send_button.setObjectName("sendButton")
+        send_button.setCursor(Qt.PointingHandCursor)
+        send_button.clicked.connect(on_send)
+        input_row.addWidget(self.input_box, 1)
+        input_row.addWidget(send_button)
+        composer_layout.addLayout(input_row)
+
+        layout.addWidget(composer_bar)
+
+    def set_state(self, state: str, color) -> None:
+        self.voice_orb.set_state(state)
+        self.voice_overlay.setVisible(state in _VOICE_STATES)
+        dot = f'<span style="color:{color.name()};">●</span>'
+        self.status_pill.setText(f"{dot} {STATUS_LABELS.get(state, state)}")
+
+    def append_chat(self, speaker: str, text: str) -> None:
+        escaped = html.escape(text).replace("\n", "<br>")
+        if speaker == "You":
+            label_color, align = ACCENT, "right"
+        else:
+            label_color, align = "#38bdf8", "left"
+        block = f'''
+        <div style="margin: 10px 0; text-align: {align};">
+            <div style="font-size: 11px; font-weight: 600; color: {label_color}; letter-spacing: 0.4px; margin-bottom: 2px;">
+                {speaker.upper()}
+            </div>
+            <div style="font-size: 13px; color: {TEXT}; line-height: 1.5;">{escaped}</div>
+        </div>
+        '''
+        self.chat_log.append(block)
+
+
+class ToolsPage(QWidget):
+    """Read-only list of every tool Rocky can currently call — pulled
+    straight from the live tool schemas, not a hand-maintained list."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        title = QLabel("Tools")
+        title.setObjectName("pageTitle")
+        layout.addWidget(title)
+
+        body = QTextEdit()
+        body.setReadOnly(True)
+        rows = []
+        for schema in ALL_SCHEMAS:
+            fn = schema["function"]
+            rows.append(
+                f'<div style="margin-bottom:12px;">'
+                f'<div style="font-size:13px; font-weight:600; color:{TEXT};">{html.escape(fn["name"])}</div>'
+                f'<div style="font-size:12px; color:{TEXT_MUTED}; margin-top:2px;">{html.escape(fn.get("description", ""))}</div>'
+                f'</div>'
+            )
+        body.setHtml("".join(rows))
+        layout.addWidget(body, 1)
+
+
+class MemoryPage(QWidget):
+    """Browses the Obsidian daily-log notes Rocky writes after every turn —
+    list on the left, note preview on the right."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        title = QLabel("Memory")
+        title.setObjectName("pageTitle")
+        layout.addWidget(title)
+
+        body = QWidget()
+        body_layout = QHBoxLayout(body)
+        body_layout.setContentsMargins(16, 4, 16, 16)
+        body_layout.setSpacing(12)
+
+        self.note_list = QListWidget()
+        self.note_list.setFixedWidth(180)
+        self.note_list.itemClicked.connect(self._on_select)
+        body_layout.addWidget(self.note_list)
+
+        self.preview = QTextEdit()
+        self.preview.setObjectName("infoPane")
+        self.preview.setReadOnly(True)
+        body_layout.addWidget(self.preview, 1)
+
+        layout.addWidget(body, 1)
+        self._loaded = False
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        if not self._loaded:
+            self._reload()
+            self._loaded = True
+
+    def _reload(self) -> None:
+        try:
+            listing = list_notes(LOG_DIR)
+        except Exception as e:
+            self.preview.setPlainText(f"Couldn't reach the Obsidian vault:\n{e}")
+            return
+        notes = [n for n in listing.splitlines() if n.strip()]
+        if not notes or notes == ["(no notes found)"]:
+            self.preview.setPlainText("No conversations logged yet.")
+            return
+        for note in sorted(notes, reverse=True):
+            name = os.path.basename(note).removesuffix(".md")
+            item = QListWidgetItem(name)
+            item.setData(Qt.UserRole, note)
+            self.note_list.addItem(item)
+        self.note_list.setCurrentRow(0)
+        self._on_select(self.note_list.item(0))
+
+    def _on_select(self, item: QListWidgetItem) -> None:
+        note_path = item.data(Qt.UserRole)
+        try:
+            content = read_note(note_path)
+        except Exception as e:
+            content = f"Couldn't read this note:\n{e}"
+        self.preview.setPlainText(content)
+
+
+class SettingsPage(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        title = QLabel("Settings")
+        title.setObjectName("pageTitle")
+        layout.addWidget(title)
+
+        info = QTextEdit()
+        info.setObjectName("infoPane")
+        info.setReadOnly(True)
+        rows = [
+            ("Model", MODEL),
+            ("Voice", DEFAULT_VOICE),
+            ("Push-to-talk", HOTKEY_LABEL),
+            ("Obsidian vault", VAULT_DIR),
+        ]
+        html_rows = "".join(
+            f'<div style="margin-bottom:10px;">'
+            f'<div style="font-size:11px; color:{TEXT_MUTED}; letter-spacing:0.4px;">{k.upper()}</div>'
+            f'<div style="font-size:13px; color:{TEXT}; margin-top:1px;">{html.escape(v)}</div>'
+            f'</div>'
+            for k, v in rows
+        )
+        info.setHtml(html_rows)
+        wrapper = QWidget()
+        wrapper_layout = QVBoxLayout(wrapper)
+        wrapper_layout.setContentsMargins(16, 4, 16, 16)
+        wrapper_layout.addWidget(info)
+        layout.addWidget(wrapper, 1)
+
+
+class ProjectsPage(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignCenter)
+        label = QLabel("Projects — coming soon")
+        label.setObjectName("emptyState")
+        label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(label)
 
 
 class RockyWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Rocky")
-        self.resize(480, 700)
+        self.resize(760, 620)
         self.setStyleSheet(DARK_STYLESHEET)
 
         if os.path.exists(_ROCKY_IMAGE_PATH):
@@ -154,42 +446,29 @@ class RockyWindow(QMainWindow):
         self.messages = new_conversation()
         self.lock = threading.Lock()
 
-        central = GradientBackground()
-        self.background = central
-        layout = QVBoxLayout(central)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(12)
+        central = QWidget()
+        root_layout = QHBoxLayout(central)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
 
-        self.orb = OrbWidget()
-        orb_row = QHBoxLayout()
-        orb_row.addStretch()
-        orb_row.addWidget(self.orb)
-        orb_row.addStretch()
-        layout.addLayout(orb_row)
+        root_layout.addWidget(self._build_sidebar())
 
-        self.status_label = QLabel(STATUS_LABELS["idle"])
-        self.status_label.setObjectName("statusLabel")
-        self.status_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.status_label)
-
-        self.chat_log = QTextEdit()
-        self.chat_log.setReadOnly(True)
-        layout.addWidget(self.chat_log)
-
-        input_row = QHBoxLayout()
-        self.input_box = QLineEdit()
-        self.input_box.setPlaceholderText("Type instead of speaking...")
-        self.input_box.returnPressed.connect(self.send_typed_text)
-        send_button = QPushButton("Send")
-        send_button.clicked.connect(self.send_typed_text)
-        input_row.addWidget(self.input_box)
-        input_row.addWidget(send_button)
-        layout.addLayout(input_row)
+        self.pages = QStackedWidget()
+        self.chat_page = ChatPage(on_send=self.send_typed_text)
+        self.tools_page = ToolsPage()
+        self.memory_page = MemoryPage()
+        self.settings_page = SettingsPage()
+        self.projects_page = ProjectsPage()
+        for page in (self.chat_page, self.projects_page, self.tools_page, self.memory_page, self.settings_page):
+            self.pages.addWidget(page)
+        root_layout.addWidget(self.pages, 1)
 
         self.setCentralWidget(central)
 
         self.bridge = Bridge()
         self.bridge.status_changed.connect(self.on_status_changed)
+
+        self._setup_shortcuts()
 
         self.voice_thread = threading.Thread(
             target=run_rocky,
@@ -198,47 +477,93 @@ class RockyWindow(QMainWindow):
         )
         self.voice_thread.start()
 
+    def _build_sidebar(self) -> QWidget:
+        sidebar = QWidget()
+        sidebar.setObjectName("sidebar")
+        sidebar.setFixedWidth(190)
+        layout = QVBoxLayout(sidebar)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        header = QWidget()
+        header.setObjectName("sidebarHeader")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(14, 14, 14, 14)
+        header_layout.setSpacing(8)
+        brand_orb = OrbWidget(size=22)
+        header_layout.addWidget(brand_orb)
+        brand_label = QLabel("Rocky")
+        brand_label.setObjectName("brandLabel")
+        header_layout.addWidget(brand_label)
+        header_layout.addStretch()
+        layout.addWidget(header)
+
+        nav_group = QButtonGroup(self)
+        nav_group.setExclusive(True)
+        for i, name in enumerate(NAV_ITEMS):
+            btn = _nav_button(name)
+            nav_group.addButton(btn, i)
+            layout.addWidget(btn)
+        nav_group.button(0).setChecked(True)
+        nav_group.idClicked.connect(self._on_nav_clicked)
+        self._nav_group = nav_group
+
+        layout.addStretch()
+        return sidebar
+
+    def _on_nav_clicked(self, index: int) -> None:
+        self.pages.setCurrentIndex(index)
+
+    def _setup_shortcuts(self) -> None:
+        for i in range(len(NAV_ITEMS)):
+            shortcut = QShortcut(QKeySequence(f"Meta+{i + 1}"), self)
+            shortcut.activated.connect(lambda idx=i: self._nav_group.button(idx).click())
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self._maybe_greet()
+
+    def _maybe_greet(self) -> None:
+        if not greeting_due():
+            return
+        mark_greeted()
+        threading.Thread(target=self._run_greeting, daemon=True).start()
+
+    def _run_greeting(self) -> None:
+        with self.lock:
+            try:
+                reply = rocky_transform(generate_greeting())
+            except Exception:
+                return
+            self.messages.append({"role": "assistant", "content": reply})
+            append_daily_log("(no message — Rocky greeted first)", reply)
+        self._emit_status("speaking", reply)
+        speak(reply)
+        self._emit_status("idle", "")
+
     def _emit_status(self, state: str, detail: str) -> None:
         self.bridge.status_changed.emit(state, detail)
 
     def on_status_changed(self, state: str, detail: str) -> None:
-        self.status_label.setText(STATUS_LABELS.get(state, state))
-        self.orb.set_state(state)
-        self.background.set_color(STATE_COLORS.get(state, STATE_COLORS["idle"]))
+        color = STATE_COLORS.get(state, STATE_COLORS["idle"])
+        self.chat_page.set_state(state, color)
         if state == "heard_command":
-            self.append_chat("You", detail)
+            self.chat_page.append_chat("You", detail)
         elif state == "speaking":
-            self.append_chat("Rocky", detail)
-
-    def append_chat(self, speaker: str, text: str) -> None:
-        escaped = html.escape(text).replace("\n", "<br>")
-        if speaker == "You":
-            align, bg, fg, label = "right", "#5865f2", "#ffffff", ""
-        else:
-            align, bg, fg, label = "left", "#22283a", "#e4e4f2", '<b style="color:#38bdf8;">Rocky</b><br>'
-        bubble = f'''
-        <table width="100%" cellspacing="0" style="margin-bottom:8px;"><tr>
-            <td align="{align}">
-                <table cellpadding="9" style="background-color:{bg}; border-radius:14px;">
-                    <tr><td style="color:{fg}; font-size:13px;">{label}{escaped}</td></tr>
-                </table>
-            </td>
-        </tr></table>
-        '''
-        self.chat_log.append(bubble)
+            self.chat_page.append_chat("Rocky", detail)
 
     def send_typed_text(self) -> None:
-        text = self.input_box.text().strip()
+        text = self.chat_page.input_box.text().strip()
         if not text:
             return
-        self.input_box.clear()
+        self.chat_page.input_box.clear()
         threading.Thread(
             target=handle_turn,
             args=(self.messages, text, self._emit_status, self.lock),
             daemon=True,
         ).start()
 
-    def closeEvent(self, event: QCloseEvent) -> None:
+    def closeEvent(self, event) -> None:
         # Keep listening in the background when the window is closed —
         # only Cmd+Q (or the app actually quitting) stops Rocky.
         event.ignore()

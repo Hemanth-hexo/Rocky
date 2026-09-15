@@ -74,6 +74,101 @@ def play_music(query: str) -> str:
     return output or f"(exit {result.returncode})"
 
 
+def create_reminder(text: str, due_date: str = "") -> str:
+    """Creates a reminder in Reminders.app. due_date, when given, must be
+    'MM/DD/YYYY HH:MM' in 24-hour time."""
+    safe_text = text.replace("\\", "\\\\").replace('"', '\\"')
+    due_clause = ""
+    if due_date:
+        safe_due = due_date.replace("\\", "\\\\").replace('"', '\\"')
+        due_clause = f', due date:date "{safe_due}"'
+    script = f'''
+    tell application "Reminders"
+        make new reminder with properties {{name:"{safe_text}"{due_clause}}}
+        return "created reminder: {safe_text}"
+    end tell
+    '''
+    result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=15)
+    output = (result.stdout + result.stderr).strip()
+    return output or f"created reminder: {text}"
+
+
+def list_reminders(limit: int = 10) -> str:
+    """Lists incomplete reminders from Reminders.app, most recent list first."""
+    script = f'''
+    tell application "Reminders"
+        set output to ""
+        set reminderList to (reminders whose completed is false)
+        set n to 0
+        repeat with r in reminderList
+            if n >= {limit} then exit repeat
+            set output to output & (name of r) & linefeed
+            set n to n + 1
+        end repeat
+        return output
+    end tell
+    '''
+    result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=15)
+    output = (result.stdout + result.stderr).strip()
+    return output or "(no reminders)"
+
+
+def create_calendar_event(title: str, start_date: str, end_date: str = "") -> str:
+    """Creates an event on the default Calendar.app calendar. start_date/
+    end_date must be 'MM/DD/YYYY HH:MM' in 24-hour time; if end_date is
+    omitted the event is 30 minutes long."""
+    safe_title = title.replace("\\", "\\\\").replace('"', '\\"')
+    safe_start = start_date.replace("\\", "\\\\").replace('"', '\\"')
+    if end_date:
+        safe_end = end_date.replace("\\", "\\\\").replace('"', '\\"')
+        end_expr = f'date "{safe_end}"'
+    else:
+        end_expr = f'(date "{safe_start}") + 30 * minutes'
+    script = f'''
+    tell application "Calendar"
+        tell calendar 1
+            make new event with properties {{summary:"{safe_title}", start date:date "{safe_start}", end date:{end_expr}}}
+        end tell
+        return "created event: {safe_title}"
+    end tell
+    '''
+    result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=15)
+    output = (result.stdout + result.stderr).strip()
+    return output or f"created event: {title}"
+
+
+def read_recent_emails(count: int = 5) -> str:
+    """Reads sender/subject/date of the most recent messages in Mail.app's
+    inbox. Only sees accounts already set up in Mail.app locally — nothing
+    is fetched over the network directly, and nothing is ever sent."""
+    script = f'''
+    tell application "Mail"
+        set output to ""
+        set msgs to messages 1 thru {count} of inbox
+        repeat with m in msgs
+            set output to output & "From: " & (sender of m) & linefeed
+            set output to output & "Subject: " & (subject of m) & linefeed
+            set output to output & "Date: " & ((date received of m) as string) & linefeed & linefeed
+        end repeat
+        return output
+    end tell
+    '''
+    result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=20)
+    output = (result.stdout + result.stderr).strip()
+    return output or "(no messages found)"
+
+
+def open_url(url: str) -> str:
+    subprocess.run(["open", url], check=False)
+    return f"opened {url}"
+
+
+def set_volume(level: int) -> str:
+    level = max(0, min(100, int(level)))
+    subprocess.run(["osascript", "-e", f"set volume output volume {level}"], check=False)
+    return f"volume set to {level}"
+
+
 TOOL_FUNCTIONS = {
     "write_file": write_file,
     "read_file": read_file,
@@ -82,6 +177,12 @@ TOOL_FUNCTIONS = {
     "run_applescript": run_applescript,
     "get_current_datetime": get_current_datetime,
     "play_music": play_music,
+    "create_reminder": create_reminder,
+    "list_reminders": list_reminders,
+    "create_calendar_event": create_calendar_event,
+    "read_recent_emails": read_recent_emails,
+    "open_url": open_url,
+    "set_volume": set_volume,
 }
 
 TOOL_SCHEMAS = [
@@ -167,6 +268,87 @@ TOOL_SCHEMAS = [
                     "query": {"type": "string", "description": "Song title and/or artist to search for, e.g. 'Prisoner The Weeknd'"}
                 },
                 "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_reminder",
+            "description": "Create a reminder in Reminders.app, optionally with a due date/time.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "The reminder text"},
+                    "due_date": {"type": "string", "description": "Optional due date/time as 'MM/DD/YYYY HH:MM' in 24-hour time"},
+                },
+                "required": ["text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_reminders",
+            "description": "List incomplete reminders from Reminders.app.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "Max reminders to return (default 10)"}
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_calendar_event",
+            "description": "Create an event on the default Calendar.app calendar.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Event title"},
+                    "start_date": {"type": "string", "description": "Start date/time as 'MM/DD/YYYY HH:MM' in 24-hour time"},
+                    "end_date": {"type": "string", "description": "Optional end date/time, same format. Defaults to 30 minutes after start."},
+                },
+                "required": ["title", "start_date"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_recent_emails",
+            "description": "Read sender/subject/date of the most recent messages in Mail.app's inbox. Only sees accounts already configured in Mail.app locally.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "count": {"type": "integer", "description": "Number of recent messages to read (default 5)"}
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "open_url",
+            "description": "Open a URL in the default browser.",
+            "parameters": {
+                "type": "object",
+                "properties": {"url": {"type": "string", "description": "The URL to open"}},
+                "required": ["url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_volume",
+            "description": "Set the system output volume, 0-100.",
+            "parameters": {
+                "type": "object",
+                "properties": {"level": {"type": "integer", "description": "Volume level from 0 to 100"}},
+                "required": ["level"],
             },
         },
     },
