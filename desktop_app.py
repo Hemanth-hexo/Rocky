@@ -470,6 +470,7 @@ class RockyWindow(QMainWindow):
         root_layout.addWidget(self.pages, 1)
 
         self.setCentralWidget(central)
+        self._replay_history()
 
         self.bridge = Bridge()
         self.bridge.status_changed.connect(self.on_status_changed)
@@ -524,6 +525,23 @@ class RockyWindow(QMainWindow):
         for i in range(len(NAV_ITEMS)):
             shortcut = QShortcut(QKeySequence(f"Meta+{i + 1}"), self)
             shortcut.activated.connect(lambda idx=i: self._nav_group.button(idx).click())
+
+    def _replay_history(self) -> None:
+        # self.messages persists across restarts (agent/conversation_store)
+        # but the chat log's own QTextEdit doesn't — without this, a resumed
+        # conversation still opens to a visually empty chat even though
+        # Rocky's actual context carried forward. Skips tool-call plumbing
+        # (raw JSON content, or messages with tool_calls set) — only shows
+        # what a user would have actually seen live.
+        for msg in self.messages:
+            role = msg.get("role")
+            content = (msg.get("content") or "").strip()
+            if not content:
+                continue
+            if role == "user":
+                self.chat_page.append_chat("You", content)
+            elif role == "assistant" and not msg.get("tool_calls") and not (content.startswith("{") and content.endswith("}")):
+                self.chat_page.append_chat("Rocky", rocky_transform(content))
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)

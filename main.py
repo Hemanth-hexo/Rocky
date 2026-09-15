@@ -15,6 +15,7 @@ load_dotenv()
 from agent.conversation_store import load_conversation, save_conversation
 from agent.loop import run_turn
 from agent.obsidian import append_daily_log
+from agent.profile import mentions_profile_update, remember_from_text
 from agent.rocky_transform import rocky_transform
 from voice.listen import transcribe
 from voice.push_to_talk import PushToTalkListener
@@ -90,6 +91,12 @@ def handle_turn(
     def _run() -> bool:
         on_status("heard_command", text)
         messages.append({"role": "user", "content": text})
+        if mentions_profile_update(text):
+            # Runs in the background — extraction is its own model call and
+            # shouldn't delay the spoken reply — but it's fired unconditionally
+            # rather than left to the chat model to decide whether to call the
+            # remember() tool, which has already proven unreliable.
+            threading.Thread(target=remember_from_text, args=(text,), daemon=True).start()
         on_status("thinking", "")
         run_turn(messages)
         reply = rocky_transform(messages[-1]["content"])

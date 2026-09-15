@@ -6,12 +6,12 @@ import os
 
 import ollama
 
+from .config import MODEL
 from .github_mcp import GITHUB_FUNCTIONS, GITHUB_SCHEMAS
 from .obsidian import OBSIDIAN_FUNCTIONS, OBSIDIAN_SCHEMAS
 from .profile import PROFILE_FUNCTIONS, PROFILE_SCHEMAS, profile_block
 from .tools import TOOL_FUNCTIONS, TOOL_SCHEMAS
 
-MODEL = "qwen2.5-coder:7b-instruct-q4_K_M"
 PROMPT_PATH = os.path.join(os.path.dirname(__file__), "..", "rocky_prompt.txt")
 
 ALL_FUNCTIONS = {**TOOL_FUNCTIONS, **OBSIDIAN_FUNCTIONS, **GITHUB_FUNCTIONS, **PROFILE_FUNCTIONS}
