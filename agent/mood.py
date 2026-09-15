@@ -23,12 +23,17 @@ MOOD_SPEECH_SPEED = {
     "unimpressed": 0.95,
 }
 
-# Brackets and the colon are both optional — tested against real model
-# output and "[mood: excited]" isn't reliably what actually comes back
-# (observed "Mood:sympathetic" with no brackets at all, which the
-# brackets-required version of this regex missed entirely, leaking the raw
-# tag text into the spoken/displayed reply).
-_MOOD_TAG_RE = re.compile(r"^\s*\[?\s*mood\s*:?\s*(\w+)\s*\]?\s*", re.IGNORECASE)
+# Brackets, the colon, AND the word "mood" itself are all optional now —
+# tested against real model output across several turns and none of
+# "[mood: excited]", "Mood:sympathetic", or "[neutral]" (no "mood" word at
+# all, observed live) are reliable — each earlier, stricter version of this
+# regex missed one of these and leaked the raw tag into the spoken/
+# displayed reply. The downstream MOODS membership check is what keeps
+# this safe despite being permissive: a reply that genuinely starts with
+# an unrelated word ("Mood tracking...") only gets stripped if that word
+# happens to BE one of the five known moods, which is checked below before
+# anything is ever cut from the text.
+_MOOD_TAG_RE = re.compile(r"^\s*\[?\s*(?:mood\s*:?\s*)?(\w+)\s*\]?\s*", re.IGNORECASE)
 
 
 def extract_mood(text: str) -> tuple[str, str]:

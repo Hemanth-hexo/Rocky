@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from agent.claude_memory import claude_history_context, mentions_claude_history
 from agent.conversation_store import load_conversation, save_conversation
 from agent.loop import run_turn
 from agent.mood import MOOD_SPEECH_SPEED, extract_mood
@@ -146,6 +147,16 @@ def handle_turn(
             # itself (see agent/tools.py), there's no risk of it also trying
             # and creating a duplicate.
             _run_sync_triggers(text, messages)
+            if mentions_claude_history(text):
+                # Deterministic — tested directly: the model doesn't
+                # reliably call list_notes/read_note on its own for this,
+                # even with explicit phrasing naming the tool and folder.
+                # Pure local keyword matching against note filenames, no
+                # model call, so it can't fail the way relying on the
+                # model's judgment did.
+                context = claude_history_context(text)
+                if context:
+                    messages.append({"role": "tool", "content": f"[from imported Claude history]\n{context}"})
             run_turn(messages)
             # .get() instead of [] — messages[-1] here can be a raw ollama
             # Message object (not yet normalized to a plain dict), which
