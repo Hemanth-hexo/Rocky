@@ -14,6 +14,7 @@ from .project_files import PROJECT_FILE_FUNCTIONS, PROJECT_FILE_SCHEMAS
 from .projects import PROJECT_FUNCTIONS, PROJECT_SCHEMAS
 from .text_utils import extract_json_object
 from .tools import TOOL_FUNCTIONS, TOOL_SCHEMAS
+from .web import WEB_FUNCTIONS, WEB_SCHEMAS
 
 PROMPT_PATH = os.path.join(os.path.dirname(__file__), "..", "rocky_prompt.txt")
 
@@ -24,9 +25,16 @@ ALL_FUNCTIONS = {
     **PROFILE_FUNCTIONS,
     **PROJECT_FUNCTIONS,
     **PROJECT_FILE_FUNCTIONS,
+    **WEB_FUNCTIONS,
 }
 ALL_SCHEMAS = (
-    TOOL_SCHEMAS + OBSIDIAN_SCHEMAS + GITHUB_SCHEMAS + PROFILE_SCHEMAS + PROJECT_SCHEMAS + PROJECT_FILE_SCHEMAS
+    TOOL_SCHEMAS
+    + OBSIDIAN_SCHEMAS
+    + GITHUB_SCHEMAS
+    + PROFILE_SCHEMAS
+    + PROJECT_SCHEMAS
+    + PROJECT_FILE_SCHEMAS
+    + WEB_SCHEMAS
 )
 
 # GitHub's 10 tool schemas alone are ~1,472 of ~3,100 total tool-schema
@@ -39,7 +47,9 @@ ALL_SCHEMAS = (
 # unrelated tools — GitHub commit lookups on unrelated repos — instead of
 # just answering a plain question). Only sent when the message that
 # triggered this turn plausibly needs them.
-_NON_GITHUB_SCHEMAS = TOOL_SCHEMAS + OBSIDIAN_SCHEMAS + PROFILE_SCHEMAS + PROJECT_SCHEMAS + PROJECT_FILE_SCHEMAS
+_NON_GITHUB_SCHEMAS = (
+    TOOL_SCHEMAS + OBSIDIAN_SCHEMAS + PROFILE_SCHEMAS + PROJECT_SCHEMAS + PROJECT_FILE_SCHEMAS + WEB_SCHEMAS
+)
 _GITHUB_KEYWORDS = ("github", "repo", "pull request", "open source", "git clone")
 
 
