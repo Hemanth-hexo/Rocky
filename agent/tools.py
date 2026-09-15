@@ -171,6 +171,26 @@ def read_recent_emails(count: int = 5) -> str:
     return output or "(no messages found)"
 
 
+# Same reliability gap the reminder/calendar tools had (see
+# agent/scheduling.py) — confirmed live: the underlying AppleScript call
+# works fine on its own, but the chat model wasn't reliably deciding to
+# call read_recent_emails() on requests like "check my email". Unlike
+# reminders/calendar, a missed or duplicate fetch here is harmless (it's a
+# read, not a side effect), so this stays ALSO available as a normal
+# model-callable tool — this trigger check is just a backstop, not the
+# only path.
+_EMAIL_TRIGGERS = (
+    "check my email", "check email", "check my inbox", "check inbox",
+    "any new emails", "new emails", "recent emails", "read my email",
+    "read my inbox", "what's in my inbox", "whats in my inbox",
+)
+
+
+def mentions_email_check(text: str) -> bool:
+    lower = text.lower()
+    return any(t in lower for t in _EMAIL_TRIGGERS)
+
+
 def open_url(url: str) -> str:
     subprocess.run(["open", url], check=False)
     return f"opened {url}"

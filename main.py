@@ -23,6 +23,7 @@ from agent.scheduling import (
     mentions_calendar_event,
     mentions_reminder,
 )
+from agent.tools import mentions_email_check, read_recent_emails
 from voice.listen import transcribe
 from voice.push_to_talk import PushToTalkListener
 from voice.speak import speak
@@ -123,6 +124,13 @@ def handle_turn(
             result = create_calendar_event_from_text(text)
             note = f"[calendar event created] {result}" if result else "[couldn't parse a clear event from that message]"
             messages.append({"role": "tool", "content": note})
+        if mentions_email_check(text):
+            # A backstop, not the only path (read_recent_emails is still a
+            # normal model-callable tool too) — confirmed live that the model
+            # wasn't reliably calling it on its own for requests like "check
+            # my email", even though the underlying AppleScript call worked
+            # fine every time it was tested directly.
+            messages.append({"role": "tool", "content": f"[recent emails]\n{read_recent_emails(5)}"})
         run_turn(messages)
         reply = rocky_transform(messages[-1]["content"])
         append_daily_log(text, reply)
