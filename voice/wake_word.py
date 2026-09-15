@@ -3,6 +3,13 @@
 "Rocky" and "stop" aren't among openWakeWord's built-in pretrained words
 (alexa, hey_jarvis, hey_mycroft, hey_rhasspy), so both expect custom-trained
 ONNX models. See the project README/chat history for how to train one.
+
+UNUSED as of 2026-09-15 — push-to-talk (voice/push_to_talk.py) fully
+replaced always-on wake-word listening; nothing in main.py/desktop_app.py
+imports this module anymore. Kept, not deleted, in case wake-word listening
+is wanted again (the trained rocky_wakeword.onnx/stop_wakeword.onnx models
+next to this file represent real one-time training effort) — but treat
+anything in here as dead code until it's actually wired back in.
 """
 
 import os
