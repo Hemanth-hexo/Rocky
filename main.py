@@ -38,10 +38,6 @@ SAMPLE_RATE = 16000
 MIN_HOLD_SECONDS = 0.25
 SILENCE_RMS_THRESHOLD = 150  # int16 scale; real speech sits well above this
 
-# How often the global hotkey listener gets torn down and recreated from
-# scratch — see the note in run_rocky() for why.
-HOTKEY_REFRESH_SECONDS = 600
-
 StatusCallback = Callable[[str, str], None]
 
 
@@ -216,22 +212,27 @@ def run_rocky(on_status: StatusCallback, messages: Optional[list] = None, lock: 
             speaking_interrupt = None
         on_status("idle", "")
 
-    # Recreated periodically below rather than just started once — macOS has
-    # been observed to silently stop delivering events to a long-idle
-    # CGEventTap-based listener (the symptom: the hotkey does nothing at
-    # all, no crash, no status flicker, after the app sits unused for a
-    # while). A `launchctl kickstart -k` restart did NOT fix this when it
-    # happened before; only a fresh Listener object did — so this proactively
-    # replaces it on a timer instead of waiting for it to go stale.
+    # REVERTED (2026-09-15): this used to tear down and recreate the
+    # PushToTalkListener every HOTKEY_REFRESH_SECONDS to work around the
+    # hotkey silently going dead after the app sat idle a while. It was
+    # wrong — it crashed the whole app instead. Confirmed via three macOS
+    # crash reports landing at exact 10-minute intervals: SIGTRAP /
+    # EXC_BREAKPOINT from a `dispatch_assert_queue_fail` inside HIToolbox's
+    # TSM input-source lookup (islGetInputSourceListWithAdditions /
+    # TSMGetInputSourceProperty), reached via pynput's macOS keyboard
+    # backend querying the keyboard layout through ctypes — that HIToolbox
+    # call asserts it must run on a specific (main) dispatch queue, and
+    # constructing a new Listener from this background thread on a timer
+    # violated that repeatedly until it trapped. Recreating a Listener ONCE
+    # at startup is fine (that's what's below); doing it periodically from
+    # here is not safe. If the original idle-hotkey-death bug recurs, don't
+    # reach for this fix again — a manual quit+reopen is the known-working
+    # workaround, and any real fix needs the listener recreated on the Qt
+    # main thread, not this background one.
     listener = PushToTalkListener(on_hotkey_press, on_hotkey_release)
     listener.start()
     on_status("idle", "")
-
-    stop_event = threading.Event()
-    while not stop_event.wait(HOTKEY_REFRESH_SECONDS):
-        old_listener, listener = listener, PushToTalkListener(on_hotkey_press, on_hotkey_release)
-        listener.start()
-        old_listener.stop()
+    threading.Event().wait()  # block forever; hotkey callbacks drive everything
 
 
 def _print_status(state: str, detail: str) -> None:
