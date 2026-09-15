@@ -19,7 +19,18 @@ def extract_json_object(text: str) -> dict | None:
     if start == -1 or end == -1 or end <= start:
         return None
     try:
-        obj = json.loads(cleaned[start : end + 1])
+        # strict=False — this exact model has been observed emitting a
+        # multi-line "content" string value with literal, unescaped
+        # newlines instead of "\n" (invalid per strict JSON, which requires
+        # control characters inside strings to be escaped). That's not
+        # academic: it silently broke write_note calls with multi-line
+        # Markdown content — the JSON failed to parse, so neither this nor
+        # the structured tool_calls path recognized it as a tool call, and
+        # the broken JSON blob got shown/spoken to the user as if it were
+        # the final reply. strict=False accepts raw control characters in
+        # strings (treating them as the character they obviously meant)
+        # without loosening anything else about JSON validity.
+        obj = json.loads(cleaned[start : end + 1], strict=False)
     except json.JSONDecodeError:
         return None
     return obj if isinstance(obj, dict) else None

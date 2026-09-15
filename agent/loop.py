@@ -94,7 +94,11 @@ def run_turn(messages: list[dict]) -> list[dict]:
                 # and recover from.
                 args = call["function"]["arguments"]
                 if isinstance(args, str):
-                    args = json.loads(args)
+                    # strict=False — same literal-unescaped-newline issue
+                    # documented in text_utils.extract_json_object; this
+                    # call site parses the same kind of model-generated
+                    # JSON and is exposed to the identical failure mode.
+                    args = json.loads(args, strict=False)
                 result = fn(**args) if fn else f"unknown tool: {name}"
             except Exception as e:
                 result = f"error: {e}"

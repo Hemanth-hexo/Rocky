@@ -2,8 +2,11 @@
 user that's baked into the system prompt every single conversation,
 regardless of how the rolling chat history gets trimmed (see
 agent/conversation_store.py, capped at 40 messages) or how far back an
-Obsidian daily log sits. Chat memory feeds it: the user (or Rocky, when it
-notices something durable) calls remember() to fold a fact in.
+Obsidian daily log sits. Fed exclusively through remember_from_text()'s
+deterministic trigger-phrase path (main.py calls it when the user's
+message matches mentions_profile_update()) — NOT left to the chat model's
+own discretion to call a remember() tool mid-conversation. That was tried
+and failed: see remember()'s docstring for the actual incident.
 
 Lives as a plain Markdown note in the Obsidian vault, not hidden state —
 the user can open it directly and see or edit exactly what Rocky "knows"
@@ -45,6 +48,20 @@ def read_profile() -> str:
 
 
 def remember(fact: str) -> str:
+    """NOT exposed to the chat model as a callable tool (see the empty
+    PROFILE_FUNCTIONS/PROFILE_SCHEMAS below) — only reachable via
+    remember_from_text()'s deterministic trigger-phrase path. Real
+    incident 2026-09-15: this used to be model-callable, on the theory
+    that "a duplicate fact is harmless" (unlike create_reminder/
+    create_calendar_event, which were pulled from model access for the
+    same reason earlier that day). That theory was wrong — the model
+    called this repeatedly within single turns, rewording the same fact
+    slightly each time (exact-match dedup below doesn't catch "I got a
+    promotion" vs "I received a promotion"), and the profile note grew to
+    700+ near-duplicate lines, which then bloated every subsequent
+    system prompt past the model's context window. Duplicates aren't
+    harmless at scale — removing model discretion entirely was the fix,
+    matching create_reminder/create_calendar_event's precedent."""
     fact = fact.strip()
     # Defense in depth against exact-duplicate spam — the main protection
     # is the tool-call iteration cap in agent/loop.py (this file's profile
@@ -131,28 +148,10 @@ def profile_block() -> str:
     )
 
 
-PROFILE_FUNCTIONS = {
-    "remember": remember,
-}
+# Deliberately empty — remember() is not model-callable, see its
+# docstring above. Kept as dicts (not removed outright) so agent/loop.py's
+# `**PROFILE_FUNCTIONS`/`+ PROFILE_SCHEMAS` merges don't need special-casing
+# if this module's shape changes again later.
+PROFILE_FUNCTIONS = {}
 
-PROFILE_SCHEMAS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "remember",
-            "description": (
-                "Save one durable fact about the user to long-term memory — something true "
-                "across conversations (name, job, preferences, ongoing projects, recurring "
-                "habits), not a one-off detail from this exchange. This is separate from the "
-                "daily conversation logs and always stays in context."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "fact": {"type": "string", "description": "The fact to remember, written as a short standalone statement"}
-                },
-                "required": ["fact"],
-            },
-        },
-    },
-]
+PROFILE_SCHEMAS = []
