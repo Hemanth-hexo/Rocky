@@ -10,6 +10,7 @@ from .config import MODEL
 from .github_mcp import GITHUB_FUNCTIONS, GITHUB_SCHEMAS
 from .obsidian import OBSIDIAN_FUNCTIONS, OBSIDIAN_SCHEMAS
 from .profile import PROFILE_FUNCTIONS, PROFILE_SCHEMAS, profile_block
+from .text_utils import extract_json_object
 from .tools import TOOL_FUNCTIONS, TOOL_SCHEMAS
 
 PROMPT_PATH = os.path.join(os.path.dirname(__file__), "..", "rocky_prompt.txt")
@@ -38,20 +39,8 @@ def _parse_loose_tool_call(content: str) -> dict | None:
     Let's do this.\n\n{...}") rather than emitting pure JSON, so this scans
     for a {...} substring anywhere in the content rather than requiring the
     whole message to be just the JSON object."""
-    if not content:
-        return None
-    text = content.strip()
-    for tag in ("<tool_call>", "</tool_call>", "```json", "```"):
-        text = text.replace(tag, "")
-    start = text.find("{")
-    end = text.rfind("}")
-    if start == -1 or end == -1 or end <= start:
-        return None
-    try:
-        obj = json.loads(text[start : end + 1])
-    except json.JSONDecodeError:
-        return None
-    if isinstance(obj, dict) and "name" in obj and "arguments" in obj and obj["name"] in ALL_FUNCTIONS:
+    obj = extract_json_object(content)
+    if obj and "name" in obj and "arguments" in obj and obj["name"] in ALL_FUNCTIONS:
         return obj
     return None
 

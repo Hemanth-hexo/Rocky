@@ -11,3 +11,4 @@ python-dotenv
 PySide6
 librosa
 pynput
+dateparser

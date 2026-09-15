@@ -17,6 +17,12 @@ from agent.loop import run_turn
 from agent.obsidian import append_daily_log
 from agent.profile import mentions_profile_update, remember_from_text
 from agent.rocky_transform import rocky_transform
+from agent.scheduling import (
+    create_calendar_event_from_text,
+    create_reminder_from_text,
+    mentions_calendar_event,
+    mentions_reminder,
+)
 from voice.listen import transcribe
 from voice.push_to_talk import PushToTalkListener
 from voice.speak import speak
@@ -31,6 +37,10 @@ SAMPLE_RATE = 16000
 # below exist specifically to kill that.
 MIN_HOLD_SECONDS = 0.25
 SILENCE_RMS_THRESHOLD = 150  # int16 scale; real speech sits well above this
+
+# How often the global hotkey listener gets torn down and recreated from
+# scratch — see the note in run_rocky() for why.
+HOTKEY_REFRESH_SECONDS = 600
 
 StatusCallback = Callable[[str, str], None]
 
@@ -98,6 +108,21 @@ def handle_turn(
             # remember() tool, which has already proven unreliable.
             threading.Thread(target=remember_from_text, args=(text,), daemon=True).start()
         on_status("thinking", "")
+        # Unlike remember(), these run synchronously and BEFORE run_turn —
+        # their outcome is fed in as a synthetic tool message so the model's
+        # actual reply can reference what really happened ("set for 5pm
+        # tomorrow") instead of guessing, and since create_reminder/
+        # create_calendar_event are no longer tools the model can call
+        # itself (see agent/tools.py), there's no risk of it also trying
+        # and creating a duplicate.
+        if mentions_reminder(text):
+            result = create_reminder_from_text(text)
+            note = f"[reminder created] {result}" if result else "[couldn't parse a clear reminder from that message]"
+            messages.append({"role": "tool", "content": note})
+        elif mentions_calendar_event(text):
+            result = create_calendar_event_from_text(text)
+            note = f"[calendar event created] {result}" if result else "[couldn't parse a clear event from that message]"
+            messages.append({"role": "tool", "content": note})
         run_turn(messages)
         reply = rocky_transform(messages[-1]["content"])
         append_daily_log(text, reply)
@@ -191,10 +216,22 @@ def run_rocky(on_status: StatusCallback, messages: Optional[list] = None, lock: 
             speaking_interrupt = None
         on_status("idle", "")
 
+    # Recreated periodically below rather than just started once — macOS has
+    # been observed to silently stop delivering events to a long-idle
+    # CGEventTap-based listener (the symptom: the hotkey does nothing at
+    # all, no crash, no status flicker, after the app sits unused for a
+    # while). A `launchctl kickstart -k` restart did NOT fix this when it
+    # happened before; only a fresh Listener object did — so this proactively
+    # replaces it on a timer instead of waiting for it to go stale.
     listener = PushToTalkListener(on_hotkey_press, on_hotkey_release)
     listener.start()
     on_status("idle", "")
-    threading.Event().wait()  # block forever; hotkey callbacks drive everything
+
+    stop_event = threading.Event()
+    while not stop_event.wait(HOTKEY_REFRESH_SECONDS):
+        old_listener, listener = listener, PushToTalkListener(on_hotkey_press, on_hotkey_release)
+        listener.start()
+        old_listener.stop()
 
 
 def _print_status(state: str, detail: str) -> None:

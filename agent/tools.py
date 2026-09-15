@@ -76,7 +76,17 @@ def play_music(query: str) -> str:
 
 def create_reminder(text: str, due_date: str = "") -> str:
     """Creates a reminder in Reminders.app. due_date, when given, must be
-    'MM/DD/YYYY HH:MM' in 24-hour time."""
+    'MM/DD/YYYY HH:MM' in 24-hour time.
+
+    NOT exposed to the chat model as a callable tool (see TOOL_FUNCTIONS/
+    TOOL_SCHEMAS below) — only reachable via agent/scheduling.py's
+    deterministic trigger-phrase path. Letting the model decide whether to
+    call this on its own risks a duplicate: if the deterministic path
+    already created a reminder for an explicit "remind me..." request, an
+    unreliable model might ALSO decide to call this itself, creating two
+    real Reminders.app entries for the same request. remember() in
+    agent/profile.py can afford model discretion because a duplicate fact
+    is harmless; a duplicate reminder isn't."""
     safe_text = text.replace("\\", "\\\\").replace('"', '\\"')
     due_clause = ""
     if due_date:
@@ -116,7 +126,10 @@ def list_reminders(limit: int = 10) -> str:
 def create_calendar_event(title: str, start_date: str, end_date: str = "") -> str:
     """Creates an event on the default Calendar.app calendar. start_date/
     end_date must be 'MM/DD/YYYY HH:MM' in 24-hour time; if end_date is
-    omitted the event is 30 minutes long."""
+    omitted the event is 30 minutes long.
+
+    Also NOT exposed to the chat model — same duplicate-side-effect reason
+    as create_reminder above."""
     safe_title = title.replace("\\", "\\\\").replace('"', '\\"')
     safe_start = start_date.replace("\\", "\\\\").replace('"', '\\"')
     if end_date:
@@ -177,9 +190,10 @@ TOOL_FUNCTIONS = {
     "run_applescript": run_applescript,
     "get_current_datetime": get_current_datetime,
     "play_music": play_music,
-    "create_reminder": create_reminder,
+    # create_reminder/create_calendar_event deliberately excluded — see
+    # their docstrings above. Only list_reminders (a read, no duplicate
+    # risk) is model-callable.
     "list_reminders": list_reminders,
-    "create_calendar_event": create_calendar_event,
     "read_recent_emails": read_recent_emails,
     "open_url": open_url,
     "set_volume": set_volume,
@@ -274,21 +288,6 @@ TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
-            "name": "create_reminder",
-            "description": "Create a reminder in Reminders.app, optionally with a due date/time.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "text": {"type": "string", "description": "The reminder text"},
-                    "due_date": {"type": "string", "description": "Optional due date/time as 'MM/DD/YYYY HH:MM' in 24-hour time"},
-                },
-                "required": ["text"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "list_reminders",
             "description": "List incomplete reminders from Reminders.app.",
             "parameters": {
@@ -296,22 +295,6 @@ TOOL_SCHEMAS = [
                 "properties": {
                     "limit": {"type": "integer", "description": "Max reminders to return (default 10)"}
                 },
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "create_calendar_event",
-            "description": "Create an event on the default Calendar.app calendar.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "title": {"type": "string", "description": "Event title"},
-                    "start_date": {"type": "string", "description": "Start date/time as 'MM/DD/YYYY HH:MM' in 24-hour time"},
-                    "end_date": {"type": "string", "description": "Optional end date/time, same format. Defaults to 30 minutes after start."},
-                },
-                "required": ["title", "start_date"],
             },
         },
     },
