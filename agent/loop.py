@@ -8,18 +8,25 @@ import ollama
 
 from .github_mcp import GITHUB_FUNCTIONS, GITHUB_SCHEMAS
 from .obsidian import OBSIDIAN_FUNCTIONS, OBSIDIAN_SCHEMAS
+from .profile import PROFILE_FUNCTIONS, PROFILE_SCHEMAS, profile_block
 from .tools import TOOL_FUNCTIONS, TOOL_SCHEMAS
 
 MODEL = "qwen2.5-coder:7b-instruct-q4_K_M"
 PROMPT_PATH = os.path.join(os.path.dirname(__file__), "..", "rocky_prompt.txt")
 
-ALL_FUNCTIONS = {**TOOL_FUNCTIONS, **OBSIDIAN_FUNCTIONS, **GITHUB_FUNCTIONS}
-ALL_SCHEMAS = TOOL_SCHEMAS + OBSIDIAN_SCHEMAS + GITHUB_SCHEMAS
+ALL_FUNCTIONS = {**TOOL_FUNCTIONS, **OBSIDIAN_FUNCTIONS, **GITHUB_FUNCTIONS, **PROFILE_FUNCTIONS}
+ALL_SCHEMAS = TOOL_SCHEMAS + OBSIDIAN_SCHEMAS + GITHUB_SCHEMAS + PROFILE_SCHEMAS
 
 
 def load_system_prompt() -> str:
     with open(PROMPT_PATH, "r") as f:
-        return f.read()
+        base = f.read()
+    # The profile ("central brain") is folded straight into the system
+    # prompt rather than kept as its own message — the system message is
+    # never trimmed by conversation_store's rolling history cap, so this is
+    # what keeps it "always known" regardless of how old the conversation
+    # that mentioned it is.
+    return base + profile_block()
 
 
 def _parse_loose_tool_call(content: str) -> dict | None:

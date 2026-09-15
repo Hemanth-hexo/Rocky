@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
 from agent.greeting import generate_greeting, greeting_due, mark_greeted
 from agent.loop import ALL_SCHEMAS, MODEL
 from agent.obsidian import LOG_DIR, VAULT_DIR, append_daily_log, list_notes, read_note
+from agent.profile import read_profile
 from agent.rocky_transform import rocky_transform
 from agent.conversation_store import load_conversation, save_conversation
 from main import handle_turn, run_rocky
@@ -317,9 +318,15 @@ class ToolsPage(QWidget):
         layout.addWidget(body, 1)
 
 
+_PROFILE_KEY = "__PROFILE__"
+
+
 class MemoryPage(QWidget):
-    """Browses the Obsidian daily-log notes Rocky writes after every turn —
-    list on the left, note preview on the right."""
+    """Browses Rocky's memory: the "central brain" profile (durable facts
+    about the user, always loaded into every conversation — see
+    agent/profile.py) pinned at the top, and the Obsidian daily-log notes
+    written after every turn below it. List on the left, preview on the
+    right."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -355,27 +362,33 @@ class MemoryPage(QWidget):
             self._loaded = True
 
     def _reload(self) -> None:
+        profile_item = QListWidgetItem("★ Profile")
+        profile_item.setData(Qt.UserRole, _PROFILE_KEY)
+        self.note_list.addItem(profile_item)
+
         try:
             listing = list_notes(LOG_DIR)
-        except Exception as e:
-            self.preview.setPlainText(f"Couldn't reach the Obsidian vault:\n{e}")
-            return
-        notes = [n for n in listing.splitlines() if n.strip()]
-        if not notes or notes == ["(no notes found)"]:
-            self.preview.setPlainText("No conversations logged yet.")
-            return
-        for note in sorted(notes, reverse=True):
-            name = os.path.basename(note).removesuffix(".md")
-            item = QListWidgetItem(name)
-            item.setData(Qt.UserRole, note)
-            self.note_list.addItem(item)
+            notes = [n for n in listing.splitlines() if n.strip()]
+            if notes and notes != ["(no notes found)"]:
+                for note in sorted(notes, reverse=True):
+                    name = os.path.basename(note).removesuffix(".md")
+                    item = QListWidgetItem(name)
+                    item.setData(Qt.UserRole, note)
+                    self.note_list.addItem(item)
+        except Exception:
+            pass  # profile is still browsable even if the vault's unreachable
+
         self.note_list.setCurrentRow(0)
-        self._on_select(self.note_list.item(0))
+        self._on_select(profile_item)
 
     def _on_select(self, item: QListWidgetItem) -> None:
-        note_path = item.data(Qt.UserRole)
+        key = item.data(Qt.UserRole)
+        if key == _PROFILE_KEY:
+            content = read_profile() or "Nothing remembered yet — Rocky saves durable facts here as you talk."
+            self.preview.setPlainText(content)
+            return
         try:
-            content = read_note(note_path)
+            content = read_note(key)
         except Exception as e:
             content = f"Couldn't read this note:\n{e}"
         self.preview.setPlainText(content)
