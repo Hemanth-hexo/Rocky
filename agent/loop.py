@@ -61,10 +61,19 @@ def _parse_loose_tool_call(content: str) -> list[dict] | None:
     return None
 
 
+# Real bug found 2026-09-15: this loop used to be `while True` with no cap
+# at all. The model got stuck re-calling remember() with the same fact
+# hundreds of times in a single turn (674 duplicate appends observed) —
+# each round trip grows `messages`, which grows the next ollama.chat()
+# call's context, which slows the next call down, which gave it more time
+# to loop again before anyone noticed. A capped, bounded loop can't do that.
+MAX_TOOL_ITERATIONS = 8
+
+
 def run_turn(messages: list[dict]) -> list[dict]:
     """Run the loop for one user turn. Mutates and returns `messages` with the
     assistant's reply (and any tool exchanges) appended."""
-    while True:
+    for _ in range(MAX_TOOL_ITERATIONS):
         response = ollama.chat(model=MODEL, messages=messages, tools=ALL_SCHEMAS)
         msg = response["message"]
         messages.append(msg)
@@ -91,6 +100,17 @@ def run_turn(messages: list[dict]) -> list[dict]:
                 result = f"error: {e}"
 
             messages.append({"role": "tool", "content": str(result)})
+
+    # Hit the cap — force a plain-text final answer by dropping `tools`
+    # from this last call, so the model physically cannot request another
+    # tool call no matter how insistent it is.
+    messages.append({
+        "role": "tool",
+        "content": "(tool-call limit reached for this turn — give your final answer now, in plain text, no more tool calls)",
+    })
+    response = ollama.chat(model=MODEL, messages=messages)
+    messages.append(response["message"])
+    return messages
 
 
 def new_conversation() -> list[dict]:

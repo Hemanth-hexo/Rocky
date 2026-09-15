@@ -45,12 +45,23 @@ def read_profile() -> str:
 
 
 def remember(fact: str) -> str:
+    fact = fact.strip()
+    # Defense in depth against exact-duplicate spam — the main protection
+    # is the tool-call iteration cap in agent/loop.py (this file's profile
+    # note once grew to 700+ copies of the same fact from a single runaway
+    # turn before that cap existed), but even a bounded loop still appends
+    # once per call, and the same fact can legitimately come up again in a
+    # later, separate conversation. Exact-match only; not trying to catch
+    # near-duplicates worded differently.
+    existing = read_profile()
+    if f"- {fact}" in existing.splitlines():
+        return f"already known: {fact}"
     os.makedirs(os.path.dirname(PROFILE_PATH), exist_ok=True)
     exists = os.path.exists(PROFILE_PATH)
     with open(PROFILE_PATH, "a") as f:
         if not exists:
             f.write("# Rocky Profile\n\nDurable facts about the user — always loaded into context.\n\n")
-        f.write(f"- {fact.strip()}\n")
+        f.write(f"- {fact}\n")
     return f"remembered: {fact}"
 
 
