@@ -38,7 +38,7 @@ from agent.loop import ALL_SCHEMAS, MODEL
 from agent.obsidian import LOG_DIR, VAULT_DIR, append_daily_log, list_notes, read_note
 from agent.rocky_transform import rocky_transform
 from main import handle_turn, new_conversation, run_rocky
-from orb_widget import STATE_COLORS, OrbWidget
+from orb_widget import STATE_COLORS, OrbWidget, ParticleOrbWidget
 from voice.push_to_talk import HOTKEY_LABEL
 from voice.speak import DEFAULT_VOICE, speak
 
@@ -233,7 +233,10 @@ class ChatPage(QWidget):
         overlay_layout = QVBoxLayout(self.voice_overlay)
         overlay_layout.setContentsMargins(0, 20, 0, 12)
         overlay_layout.setSpacing(8)
-        self.voice_orb = OrbWidget(size=120)
+        # Prototype: the sparse dot-particle "thinking orb" look, used only
+        # for the active voice-listening state. The always-visible small
+        # brand orb (sidebar header) stays the glossy sphere for now.
+        self.voice_orb = ParticleOrbWidget(size=120)
         orb_row = QHBoxLayout()
         orb_row.addStretch()
         orb_row.addWidget(self.voice_orb)

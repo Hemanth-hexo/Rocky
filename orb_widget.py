@@ -113,3 +113,75 @@ class OrbWidget(QWidget):
         painter.setPen(QPen(color.darker(260), max(1.0, radius * 0.03)))
         painter.setBrush(Qt.NoBrush)
         painter.drawEllipse(QPointF(cx, cy), radius, radius)
+
+
+class ParticleOrbWidget(QWidget):
+    """"Thinking orb" style prototype — a sparse dot-particle sphere,
+    slowly rotating, inspired by libraries.dev's thinking-orbs component.
+    Kept cheap on purpose (unlike the earlier particle-based orb that got
+    dropped for lag): a fixed set of points computed ONCE at construction
+    (Fibonacci sphere — even coverage, no per-frame random sampling), then
+    just rotated and redrawn as flat circles every frame. No per-particle
+    gradients, no dynamic point count."""
+
+    _PARTICLE_COUNT = 180
+    _ROTATE_SPEED = 0.55  # radians/sec
+
+    def __init__(self, parent=None, size: int = 120):
+        super().__init__(parent)
+        self.setFixedSize(size, size)
+        self.setAttribute(Qt.WA_OpaquePaintEvent, True)
+        self._state = "recording"
+        self._color = QColor(STATE_COLORS["recording"])
+        self._angle = 0.0
+        self._points = self._make_sphere_points(self._PARTICLE_COUNT)
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start(_FRAME_MS)
+
+    @staticmethod
+    def _make_sphere_points(n: int) -> list[tuple[float, float, float]]:
+        # Fibonacci sphere: evenly spread points on a unit sphere with a
+        # single closed-form pass — no rejection sampling, no per-point trig
+        # beyond one sin/cos pair.
+        points = []
+        golden_angle = math.pi * (3.0 - math.sqrt(5.0))
+        for i in range(n):
+            y = 1 - (i / (n - 1)) * 2
+            radius_at_y = math.sqrt(max(0.0, 1 - y * y))
+            theta = golden_angle * i
+            points.append((math.cos(theta) * radius_at_y, y, math.sin(theta) * radius_at_y))
+        return points
+
+    def set_state(self, state: str) -> None:
+        self._state = state if state in STATE_COLORS else "recording"
+        self._color = QColor(STATE_COLORS[self._state])
+
+    def _tick(self) -> None:
+        self._angle += self._ROTATE_SPEED * (_FRAME_MS / 1000.0)
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.fillRect(self.rect(), QColor(15, 15, 22))
+        painter.setPen(Qt.NoPen)
+
+        w, h = self.width(), self.height()
+        cx, cy = w / 2, h / 2
+        r = min(w, h) * 0.42
+        cos_a, sin_a = math.cos(self._angle), math.sin(self._angle)
+        color = self._color
+
+        # Rotate around Y, then sort back-to-front so near dots draw over
+        # far ones — this alone is what sells the "sphere" read.
+        rotated = [(x * cos_a - z * sin_a, y, x * sin_a + z * cos_a) for x, y, z in self._points]
+        rotated.sort(key=lambda p: p[2])
+
+        for x, y, z in rotated:
+            depth = (z + 1) / 2  # 0 (far) .. 1 (near)
+            dot_r = 1.0 + depth * 1.8
+            c = QColor(color)
+            c.setAlpha(int(60 + depth * 195))
+            painter.setBrush(QBrush(c))
+            painter.drawEllipse(QPointF(cx + x * r, cy + y * r), dot_r, dot_r)
