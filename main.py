@@ -14,6 +14,7 @@ load_dotenv()
 
 from agent.conversation_store import load_conversation, save_conversation
 from agent.loop import run_turn
+from agent.mood import MOOD_SPEECH_SPEED, extract_mood
 from agent.obsidian import append_daily_log
 from agent.profile import mentions_profile_update, remember_from_text
 from agent.rocky_transform import rocky_transform
@@ -38,7 +39,39 @@ SAMPLE_RATE = 16000
 MIN_HOLD_SECONDS = 0.25
 SILENCE_RMS_THRESHOLD = 150  # int16 scale; real speech sits well above this
 
-StatusCallback = Callable[[str, str], None]
+StatusCallback = Callable[..., None]  # (state, detail, mood="neutral") — mood is only ever real for "speaking"
+
+# Deterministic trigger-phrase bypasses for requests where letting the chat
+# model decide whether to call a tool has proven unreliable (see
+# agent/profile.py's module docstring for the case — profile-saving — that
+# started this pattern). Each entry: (trigger check, handler that performs
+# the action and returns a result string or None, ok-label, fail-label).
+# Independent checks run in order, not elif — a message can reasonably ask
+# for more than one of these at once ("add it to my calendar and remind me
+# too" used to only create the reminder because of a stray elif).
+_SYNC_TRIGGERS = (
+    (mentions_reminder, create_reminder_from_text, "reminder created", "couldn't parse a clear reminder from that message"),
+    (mentions_calendar_event, create_calendar_event_from_text, "calendar event created", "couldn't parse a clear event from that message"),
+)
+
+
+def _run_sync_triggers(text: str, messages: list) -> None:
+    for mentions, handler, ok_label, fail_label in _SYNC_TRIGGERS:
+        if mentions(text):
+            result = handler(text)
+            note = f"[{ok_label}] {result}" if result else f"[{fail_label}]"
+            messages.append({"role": "tool", "content": note})
+
+
+def _safe_remember(text: str) -> None:
+    # Runs on its own daemon thread (fire-and-forget) — this only stops it
+    # from dying silently on a transient ollama/network error; a failure
+    # here was already best-effort (see agent/profile.py) and doesn't need
+    # to surface to the user, just not vanish without a trace in the log.
+    try:
+        remember_from_text(text)
+    except Exception as e:
+        print(f"[handle_turn] remember_from_text failed: {e!r}")
 
 
 class _Recorder:
@@ -102,30 +135,56 @@ def handle_turn(
             # shouldn't delay the spoken reply — but it's fired unconditionally
             # rather than left to the chat model to decide whether to call the
             # remember() tool, which has already proven unreliable.
-            threading.Thread(target=remember_from_text, args=(text,), daemon=True).start()
+            threading.Thread(target=_safe_remember, args=(text,), daemon=True).start()
         on_status("thinking", "")
-        # Unlike remember(), these run synchronously and BEFORE run_turn —
-        # their outcome is fed in as a synthetic tool message so the model's
-        # actual reply can reference what really happened ("set for 5pm
-        # tomorrow") instead of guessing, and since create_reminder/
-        # create_calendar_event are no longer tools the model can call
-        # itself (see agent/tools.py), there's no risk of it also trying
-        # and creating a duplicate.
-        if mentions_reminder(text):
-            result = create_reminder_from_text(text)
-            note = f"[reminder created] {result}" if result else "[couldn't parse a clear reminder from that message]"
-            messages.append({"role": "tool", "content": note})
-        elif mentions_calendar_event(text):
-            result = create_calendar_event_from_text(text)
-            note = f"[calendar event created] {result}" if result else "[couldn't parse a clear event from that message]"
-            messages.append({"role": "tool", "content": note})
-        run_turn(messages)
-        reply = rocky_transform(messages[-1]["content"])
-        append_daily_log(text, reply)
-        save_conversation(messages)
-        on_status("speaking", reply)
-        completed = speak(reply, interrupt_event=interrupt_event)
-        return not completed
+        try:
+            # These run synchronously and BEFORE run_turn — their outcome is
+            # fed in as a synthetic tool message so the model's actual reply
+            # can reference what really happened ("set for 5pm tomorrow")
+            # instead of guessing, and since create_reminder/
+            # create_calendar_event are no longer tools the model can call
+            # itself (see agent/tools.py), there's no risk of it also trying
+            # and creating a duplicate.
+            _run_sync_triggers(text, messages)
+            run_turn(messages)
+            # .get() instead of [] — messages[-1] here can be a raw ollama
+            # Message object (not yet normalized to a plain dict), which
+            # raises KeyError on [] access if a pure-tool-call turn ever
+            # left content unset rather than "". `or ""` covers .get()
+            # returning None for a field that exists-but-is-unset, which a
+            # bare default wouldn't catch.
+            raw_content = messages[-1].get("content") or ""
+            # Mood extraction happens on the RAW model output, before
+            # rocky_transform — the tag is "[mood: excited]"-shaped and
+            # rocky_transform's word-mangling (article-dropping etc.) would
+            # corrupt it if it ran first.
+            mood, stripped_content = extract_mood(raw_content)
+            reply = rocky_transform(stripped_content)
+            append_daily_log(text, reply)
+            save_conversation(messages)
+            on_status("speaking", reply, mood)
+            completed = speak(reply, interrupt_event=interrupt_event, speed=MOOD_SPEECH_SPEED.get(mood, 1.0))
+            return not completed
+        except Exception as e:
+            # Every step above (extraction, run_turn's ollama call, speak's
+            # TTS) was previously unguarded — a transient failure in any of
+            # them killed this thread silently: the UI froze on "Thinking…"
+            # forever, and the user's message above was left dangling in
+            # `messages` with no reply, corrupting the next turn's context.
+            # This still surfaces the failure (spoken + logged) instead of
+            # papering over it, but it can no longer take the whole turn
+            # down silently.
+            print(f"[handle_turn] turn failed: {e!r}")
+            fallback = "Sorry, something went wrong there. Try again?"
+            messages.append({"role": "assistant", "content": fallback})
+            save_conversation(messages)
+            # "sympathetic" — gentler pulse/pacing actually suits an apology.
+            on_status("speaking", fallback, "sympathetic")
+            try:
+                speak(fallback, interrupt_event=interrupt_event, speed=MOOD_SPEECH_SPEED["sympathetic"])
+            except Exception as speak_err:
+                print(f"[handle_turn] fallback speak() also failed: {speak_err!r}")
+            return False
 
     if lock is None:
         return _run()
@@ -195,8 +254,18 @@ def run_rocky(on_status: StatusCallback, messages: Optional[list] = None, lock: 
             on_status("idle", "")
             return
         on_status("transcribing", "")
-        audio_path = _save_wav(audio)
-        text = transcribe(audio_path)
+        try:
+            audio_path = _save_wav(audio)
+            text = transcribe(audio_path)
+        except Exception as e:
+            # Previously unguarded: a transcription failure (a malformed
+            # WAV edge case, faster-whisper raising on unusual input) killed
+            # this thread before on_status("idle", ...) ran, leaving the UI
+            # stuck showing "Transcribing…" until the next successful turn
+            # happened to overwrite it — with the recording silently lost.
+            print(f"[run_rocky] transcription failed: {e!r}")
+            on_status("idle", "")
+            return
         if not text.strip():
             on_status("idle", "")
             return
@@ -235,7 +304,7 @@ def run_rocky(on_status: StatusCallback, messages: Optional[list] = None, lock: 
     threading.Event().wait()  # block forever; hotkey callbacks drive everything
 
 
-def _print_status(state: str, detail: str) -> None:
+def _print_status(state: str, detail: str, mood: str = "neutral") -> None:
     labels = {
         "idle": "Hold Option+Control to talk...",
         "recording": "Recording — release to send...",

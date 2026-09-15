@@ -27,6 +27,19 @@ def _to_plain(msg) -> dict:
     return msg
 
 
+def _drop_leading_orphan_tool_messages(msgs: list[dict]) -> list[dict]:
+    # A flat message-count slice can land partway through an assistant
+    # tool_calls -> tool-response pair, leaving a "tool" role message at
+    # the front with no preceding call for the model to make sense of —
+    # ollama.chat() can choke on or misinterpret that role sequence. Trim
+    # any leading orphaned tool messages so a truncated/reloaded
+    # conversation always starts on a clean turn boundary.
+    i = 0
+    while i < len(msgs) and msgs[i].get("role") == "tool":
+        i += 1
+    return msgs[i:]
+
+
 def load_conversation() -> list[dict]:
     """Always starts from the CURRENT system prompt (so rocky_prompt.txt
     edits take effect immediately, never frozen into an old save) plus
@@ -41,11 +54,12 @@ def load_conversation() -> list[dict]:
         return fresh
     if not isinstance(saved, list):
         return fresh
-    return fresh + saved[-_MAX_SAVED_MESSAGES:]
+    return fresh + _drop_leading_orphan_tool_messages(saved[-_MAX_SAVED_MESSAGES:])
 
 
 def save_conversation(messages: list[dict]) -> None:
     os.makedirs(_STATE_DIR, exist_ok=True)
     body = [plain for m in messages if (plain := _to_plain(m)).get("role") != "system"]
+    trimmed = _drop_leading_orphan_tool_messages(body[-_MAX_SAVED_MESSAGES:])
     with open(_CONVERSATION_FILE, "w") as f:
-        json.dump(body[-_MAX_SAVED_MESSAGES:], f)
+        json.dump(trimmed, f)

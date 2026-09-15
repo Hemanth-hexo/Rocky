@@ -11,6 +11,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 GIT_MCP_DIR = os.environ.get("GIT_MCP_PATH", os.path.expanduser("~/GIT_MCP"))
+_TIMEOUT_SECONDS = 30
 
 
 async def _call_tool(tool_name: str, arguments: dict) -> str:
@@ -24,7 +25,15 @@ async def _call_tool(tool_name: str, arguments: dict) -> str:
 
 
 def _run_tool(tool_name: str, arguments: dict) -> str:
-    return asyncio.run(_call_tool(tool_name, arguments))
+    try:
+        return asyncio.run(asyncio.wait_for(_call_tool(tool_name, arguments), timeout=_TIMEOUT_SECONDS))
+    except asyncio.TimeoutError:
+        # Previously unbounded: a hung/misconfigured `node server.js` (a
+        # missing ~/GIT_MCP, a GitHub rate-limit stall) blocked here
+        # forever — and since every tool call runs inside handle_turn's
+        # `with lock:` (main.py), that froze the whole app, not just this
+        # one tool call.
+        return f"{tool_name} timed out after {_TIMEOUT_SECONDS}s — GIT_MCP server may be unreachable or misconfigured"
 
 
 def _filters(min_stars: int, language: str, limit: int) -> dict:

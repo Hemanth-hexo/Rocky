@@ -31,6 +31,26 @@ _STATE_SPEED = {
 _FRAME_MS = 40  # 25fps — the pulse is subtle, doesn't need more
 _COLOR_EASE = 0.10
 
+# Only applied while _state == "speaking" — mood is otherwise always
+# "neutral" (main.py only ever extracts a real mood from a spoken reply),
+# so this only affects the moment Rocky is actually talking. Scales the
+# existing pulse/speed rather than introducing a new hue, keeping the
+# all-blue-family palette intact (see STATE_COLORS above).
+_MOOD_PULSE_SCALE = {
+    "neutral": 1.0,
+    "excited": 1.8,
+    "playful": 1.4,
+    "sympathetic": 0.6,
+    "unimpressed": 0.3,
+}
+_MOOD_SPEED_SCALE = {
+    "neutral": 1.0,
+    "excited": 1.5,
+    "playful": 1.2,
+    "sympathetic": 0.7,
+    "unimpressed": 0.5,
+}
+
 
 def _lerp_color(c1: QColor, c2: QColor, t: float) -> QColor:
     return QColor(
@@ -50,6 +70,7 @@ class OrbWidget(QWidget):
         # ambient gradient underneath on every single animation tick.
         self.setAttribute(Qt.WA_OpaquePaintEvent, True)
         self._state = "idle"
+        self._mood = "neutral"
         self._t = 0.0
         self._color = QColor(STATE_COLORS["idle"])
         self._target_color = QColor(STATE_COLORS["idle"])
@@ -61,12 +82,17 @@ class OrbWidget(QWidget):
         self._state = state if state in STATE_COLORS else "idle"
         self._target_color = QColor(STATE_COLORS[self._state])
 
+    def set_mood(self, mood: str) -> None:
+        self._mood = mood if mood in _MOOD_PULSE_SCALE else "neutral"
+
     def current_color(self) -> QColor:
         return QColor(self._color)
 
     def _tick(self) -> None:
         dt = _FRAME_MS / 1000.0
         speed = _STATE_SPEED.get(self._state, 1.0)
+        if self._state == "speaking":
+            speed *= _MOOD_SPEED_SCALE.get(self._mood, 1.0)
         self._t += dt * speed
         if self._color != self._target_color:
             self._color = _lerp_color(self._color, self._target_color, _COLOR_EASE)
@@ -85,8 +111,12 @@ class OrbWidget(QWidget):
         base_radius = min(w, h) * 0.34
         color = self._color
 
-        # Gentle breathing pulse — subtle on purpose, this is a light touch not a bounce.
-        pulse = 0.06 * math.sin(self._t * math.pi)
+        # Gentle breathing pulse — subtle on purpose, this is a light touch
+        # not a bounce. Amplified/dampened by mood while actually speaking
+        # (see _MOOD_PULSE_SCALE) — excited pulses bigger and faster,
+        # unimpressed goes nearly still, without ever changing hue.
+        pulse_scale = _MOOD_PULSE_SCALE.get(self._mood, 1.0) if self._state == "speaking" else 1.0
+        pulse = 0.06 * pulse_scale * math.sin(self._t * math.pi)
         radius = base_radius * (1.0 + pulse)
 
         painter.setPen(Qt.NoPen)
