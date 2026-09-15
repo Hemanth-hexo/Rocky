@@ -14,6 +14,7 @@ load_dotenv()
 
 from agent.conversation_store import load_conversation, save_conversation
 from agent.loop import run_turn
+from agent.mood import MOOD_SPEECH_SPEED, extract_mood
 from agent.obsidian import append_daily_log
 from agent.profile import mentions_profile_update, remember_from_text
 from agent.rocky_transform import rocky_transform
@@ -38,7 +39,7 @@ SAMPLE_RATE = 16000
 MIN_HOLD_SECONDS = 0.25
 SILENCE_RMS_THRESHOLD = 150  # int16 scale; real speech sits well above this
 
-StatusCallback = Callable[[str, str], None]
+StatusCallback = Callable[..., None]  # (state, detail, mood="neutral") — mood is only ever real for "speaking"
 
 # Deterministic trigger-phrase bypasses for requests where letting the chat
 # model decide whether to call a tool has proven unreliable (see
@@ -152,11 +153,17 @@ def handle_turn(
             # left content unset rather than "". `or ""` covers .get()
             # returning None for a field that exists-but-is-unset, which a
             # bare default wouldn't catch.
-            reply = rocky_transform(messages[-1].get("content") or "")
+            raw_content = messages[-1].get("content") or ""
+            # Mood extraction happens on the RAW model output, before
+            # rocky_transform — the tag is "[mood: excited]"-shaped and
+            # rocky_transform's word-mangling (article-dropping etc.) would
+            # corrupt it if it ran first.
+            mood, stripped_content = extract_mood(raw_content)
+            reply = rocky_transform(stripped_content)
             append_daily_log(text, reply)
             save_conversation(messages)
-            on_status("speaking", reply)
-            completed = speak(reply, interrupt_event=interrupt_event)
+            on_status("speaking", reply, mood)
+            completed = speak(reply, interrupt_event=interrupt_event, speed=MOOD_SPEECH_SPEED.get(mood, 1.0))
             return not completed
         except Exception as e:
             # Every step above (extraction, run_turn's ollama call, speak's
@@ -171,9 +178,10 @@ def handle_turn(
             fallback = "Sorry, something went wrong there. Try again?"
             messages.append({"role": "assistant", "content": fallback})
             save_conversation(messages)
-            on_status("speaking", fallback)
+            # "sympathetic" — gentler pulse/pacing actually suits an apology.
+            on_status("speaking", fallback, "sympathetic")
             try:
-                speak(fallback, interrupt_event=interrupt_event)
+                speak(fallback, interrupt_event=interrupt_event, speed=MOOD_SPEECH_SPEED["sympathetic"])
             except Exception as speak_err:
                 print(f"[handle_turn] fallback speak() also failed: {speak_err!r}")
             return False
@@ -296,7 +304,7 @@ def run_rocky(on_status: StatusCallback, messages: Optional[list] = None, lock: 
     threading.Event().wait()  # block forever; hotkey callbacks drive everything
 
 
-def _print_status(state: str, detail: str) -> None:
+def _print_status(state: str, detail: str, mood: str = "neutral") -> None:
     labels = {
         "idle": "Hold Option+Control to talk...",
         "recording": "Recording — release to send...",

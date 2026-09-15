@@ -23,20 +23,26 @@ MOOD_SPEECH_SPEED = {
     "unimpressed": 0.95,
 }
 
-_MOOD_TAG_RE = re.compile(r"^\s*\[mood:\s*(\w+)\]\s*", re.IGNORECASE)
+# Brackets and the colon are both optional — tested against real model
+# output and "[mood: excited]" isn't reliably what actually comes back
+# (observed "Mood:sympathetic" with no brackets at all, which the
+# brackets-required version of this regex missed entirely, leaking the raw
+# tag text into the spoken/displayed reply).
+_MOOD_TAG_RE = re.compile(r"^\s*\[?\s*mood\s*:?\s*(\w+)\s*\]?\s*", re.IGNORECASE)
 
 
 def extract_mood(text: str) -> tuple[str, str]:
     """Returns (mood, remaining_text). Falls back to DEFAULT_MOOD with the
-    text unchanged if the tag is missing or names something outside the
-    known set."""
+    text UNCHANGED if the tag is missing — or if something tag-shaped
+    matched but the captured word isn't an actual known mood, e.g. a reply
+    that genuinely starts with "Mood tracking..." shouldn't get its first
+    two words silently eaten just because "mood" appears up front."""
     if not text:
         return DEFAULT_MOOD, text
     match = _MOOD_TAG_RE.match(text)
     if not match:
         return DEFAULT_MOOD, text
     mood = match.group(1).lower()
-    remaining = text[match.end():]
     if mood not in MOODS:
-        mood = DEFAULT_MOOD
-    return mood, remaining
+        return DEFAULT_MOOD, text
+    return mood, text[match.end():]

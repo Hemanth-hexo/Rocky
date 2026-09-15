@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 
 from agent.greeting import generate_greeting, greeting_due, mark_greeted
 from agent.loop import ALL_SCHEMAS, MODEL
+from agent.mood import MOOD_SPEECH_SPEED, extract_mood
 from agent.obsidian import LOG_DIR, VAULT_DIR, append_daily_log, list_notes, read_note
 from agent.profile import read_profile
 from agent.projects import list_projects, read_project
@@ -197,7 +198,7 @@ class Bridge(QObject):
     queues its connected slot to run on the GUI thread instead of executing
     it inline on whichever thread emitted it."""
 
-    status_changed = Signal(str, str)
+    status_changed = Signal(str, str, str)  # state, detail, mood ("neutral" unless actually speaking)
 
 
 def _nav_button(label: str) -> QPushButton:
@@ -548,8 +549,8 @@ class RockyWindow(QMainWindow):
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(14, 14, 14, 14)
         header_layout.setSpacing(8)
-        brand_orb = OrbWidget(size=22)
-        header_layout.addWidget(brand_orb)
+        self.brand_orb = OrbWidget(size=22)
+        header_layout.addWidget(self.brand_orb)
         brand_label = QLabel("Rocky")
         brand_label.setObjectName("brandLabel")
         header_layout.addWidget(brand_label)
@@ -607,22 +608,28 @@ class RockyWindow(QMainWindow):
     def _run_greeting(self) -> None:
         with self.lock:
             try:
-                reply = rocky_transform(generate_greeting())
+                mood, stripped = extract_mood(generate_greeting())
+                reply = rocky_transform(stripped)
             except Exception:
                 return
             self.messages.append({"role": "assistant", "content": reply})
             append_daily_log("(no message — Rocky greeted first)", reply)
             save_conversation(self.messages)
-        self._emit_status("speaking", reply)
-        speak(reply)
+        self._emit_status("speaking", reply, mood)
+        speak(reply, speed=MOOD_SPEECH_SPEED.get(mood, 1.0))
         self._emit_status("idle", "")
 
-    def _emit_status(self, state: str, detail: str) -> None:
-        self.bridge.status_changed.emit(state, detail)
+    def _emit_status(self, state: str, detail: str, mood: str = "neutral") -> None:
+        self.bridge.status_changed.emit(state, detail, mood)
 
-    def on_status_changed(self, state: str, detail: str) -> None:
+    def on_status_changed(self, state: str, detail: str, mood: str = "neutral") -> None:
         color = STATE_COLORS.get(state, STATE_COLORS["idle"])
         self.chat_page.set_state(state, color)
+        # The sidebar brand orb reflects live state/mood too — previously
+        # it was purely decorative (idled forever with its own breathing
+        # pulse, never actually told what Rocky was doing).
+        self.brand_orb.set_state(state)
+        self.brand_orb.set_mood(mood)
         if state == "heard_command":
             self.chat_page.append_chat("You", detail)
         elif state == "speaking":
