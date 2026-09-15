@@ -29,6 +29,29 @@ ALL_SCHEMAS = (
     TOOL_SCHEMAS + OBSIDIAN_SCHEMAS + GITHUB_SCHEMAS + PROFILE_SCHEMAS + PROJECT_SCHEMAS + PROJECT_FILE_SCHEMAS
 )
 
+# GitHub's 10 tool schemas alone are ~1,472 of ~3,100 total tool-schema
+# tokens — real, measured overhead that's irrelevant to typical usage (a
+# health question, checking reminders, personal notes) but was being sent
+# on literally every single turn regardless. Confirmed via live testing
+# this tips total prompt+schema size close to/over the model's actual
+# 4096-token context window, and behavior degrades noticeably under that
+# pressure — not just slower, genuinely incoherent (grabbing random
+# unrelated tools — GitHub commit lookups on unrelated repos — instead of
+# just answering a plain question). Only sent when the message that
+# triggered this turn plausibly needs them.
+_NON_GITHUB_SCHEMAS = TOOL_SCHEMAS + OBSIDIAN_SCHEMAS + PROFILE_SCHEMAS + PROJECT_SCHEMAS + PROJECT_FILE_SCHEMAS
+_GITHUB_KEYWORDS = ("github", "repo", "pull request", "open source", "git clone")
+
+
+def _mentions_github(text: str) -> bool:
+    lower = text.lower()
+    return any(k in lower for k in _GITHUB_KEYWORDS)
+
+
+def _schemas_for(messages: list[dict]) -> list[dict]:
+    last_user = next((m.get("content", "") for m in reversed(messages) if m.get("role") == "user"), "")
+    return ALL_SCHEMAS if _mentions_github(last_user) else _NON_GITHUB_SCHEMAS
+
 
 def load_system_prompt() -> str:
     with open(PROMPT_PATH, "r") as f:
@@ -73,8 +96,18 @@ MAX_TOOL_ITERATIONS = 8
 def run_turn(messages: list[dict]) -> list[dict]:
     """Run the loop for one user turn. Mutates and returns `messages` with the
     assistant's reply (and any tool exchanges) appended."""
+    # Real bug found 2026-09-15: for a plain question ("what should I take
+    # before a workout"), the model hallucinated a note path, got a "no
+    # such file" error, and retried the EXACT same call 8 times — burning
+    # the whole iteration budget on a doomed repeat instead of adapting,
+    # so the forced final answer had nothing useful to work with. Track
+    # (name, args) pairs already tried this turn; a repeat skips the real
+    # call and tells the model directly to stop retrying it.
+    seen_calls: set[tuple[str, str]] = set()
+    schemas = _schemas_for(messages)
+
     for _ in range(MAX_TOOL_ITERATIONS):
-        response = ollama.chat(model=MODEL, messages=messages, tools=ALL_SCHEMAS)
+        response = ollama.chat(model=MODEL, messages=messages, tools=schemas)
         msg = response["message"]
         messages.append(msg)
 
@@ -99,7 +132,18 @@ def run_turn(messages: list[dict]) -> list[dict]:
                     # call site parses the same kind of model-generated
                     # JSON and is exposed to the identical failure mode.
                     args = json.loads(args, strict=False)
-                result = fn(**args) if fn else f"unknown tool: {name}"
+
+                call_key = (name, json.dumps(args, sort_keys=True))
+                if call_key in seen_calls:
+                    result = (
+                        f"you already called {name} with these exact arguments this turn and it "
+                        "didn't work — retrying it again won't help. Either try meaningfully "
+                        "different arguments, a different tool, or just answer from what you "
+                        "already know."
+                    )
+                else:
+                    seen_calls.add(call_key)
+                    result = fn(**args) if fn else f"unknown tool: {name}"
             except Exception as e:
                 result = f"error: {e}"
 
