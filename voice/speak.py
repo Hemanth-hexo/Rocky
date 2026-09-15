@@ -64,7 +64,12 @@ def _get_kokoro() -> Kokoro:
     return _kokoro
 
 
-def speak(text: str, voice: str = DEFAULT_VOICE, interrupt_event: threading.Event | None = None) -> bool:
+def speak(
+    text: str,
+    voice: str = DEFAULT_VOICE,
+    interrupt_event: threading.Event | None = None,
+    speed: float = 1.0,
+) -> bool:
     """Speaks `text` aloud. Returns True if playback completed normally,
     False if `interrupt_event` was set partway through (barge-in).
 
@@ -76,8 +81,11 @@ def speak(text: str, voice: str = DEFAULT_VOICE, interrupt_event: threading.Even
     `interrupt_event` decouples "how playback gets interrupted" from this
     function — pass a threading.Event that some other mechanism (the
     push-to-talk hotkey, in main.py) sets to cut playback off immediately.
+
+    `speed` is a small pacing knob (see agent/mood.py's MOOD_SPEECH_SPEED)
+    — kept subtle on purpose, this isn't meant to be dramatic.
     """
-    samples, sample_rate = _get_kokoro().create(text, voice=voice, speed=1.0, lang="en-us")
+    samples, sample_rate = _get_kokoro().create(text, voice=voice, speed=speed, lang="en-us")
     if ROBOT_EFFECT_ENABLED:
         samples = robotize(samples, sample_rate, pitch_shift_semitones=0.0, ring_mod_mix=0.15)
 
