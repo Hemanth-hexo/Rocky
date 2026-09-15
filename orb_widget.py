@@ -121,16 +121,22 @@ class ParticleOrbWidget(QWidget):
     Kept cheap on purpose (unlike the earlier particle-based orb that got
     dropped for lag): a fixed set of points computed ONCE at construction
     (Fibonacci sphere — even coverage, no per-frame random sampling), then
-    just rotated and redrawn as flat circles every frame. No per-particle
-    gradients, no dynamic point count."""
+    just rotated and redrawn as flat dots every frame. No per-particle
+    gradients, no dynamic point count.
+
+    Transparent by design — no background fill, just the dots — which only
+    works cheaply because it sits on the new flat, statically-painted page
+    background (desktop_app.py's old GradientBackground, which WAS
+    expensive to redraw and needed the opaque-fill trick, is gone)."""
 
     _PARTICLE_COUNT = 180
     _ROTATE_SPEED = 0.55  # radians/sec
+    _DOT_RADIUS = 1.15  # small and uniform — pixel-like dots, not tiny balls
 
     def __init__(self, parent=None, size: int = 120):
         super().__init__(parent)
         self.setFixedSize(size, size)
-        self.setAttribute(Qt.WA_OpaquePaintEvent, True)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
         self._state = "recording"
         self._color = QColor(STATE_COLORS["recording"])
         self._angle = 0.0
@@ -164,8 +170,9 @@ class ParticleOrbWidget(QWidget):
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.fillRect(self.rect(), QColor(15, 15, 22))
         painter.setPen(Qt.NoPen)
+        # No background fill — this widget only ever draws the dots
+        # themselves, so it blends straight into whatever page it sits on.
 
         w, h = self.width(), self.height()
         cx, cy = w / 2, h / 2
@@ -174,14 +181,15 @@ class ParticleOrbWidget(QWidget):
         color = self._color
 
         # Rotate around Y, then sort back-to-front so near dots draw over
-        # far ones — this alone is what sells the "sphere" read.
+        # far ones. Only opacity carries the depth cue now — dot size stays
+        # fixed, so this reads as a flat scatter of pixel-dots rather than
+        # a cluster of little spheres.
         rotated = [(x * cos_a - z * sin_a, y, x * sin_a + z * cos_a) for x, y, z in self._points]
         rotated.sort(key=lambda p: p[2])
 
         for x, y, z in rotated:
             depth = (z + 1) / 2  # 0 (far) .. 1 (near)
-            dot_r = 1.0 + depth * 1.8
             c = QColor(color)
-            c.setAlpha(int(60 + depth * 195))
+            c.setAlpha(int(50 + depth * 150))
             painter.setBrush(QBrush(c))
-            painter.drawEllipse(QPointF(cx + x * r, cy + y * r), dot_r, dot_r)
+            painter.drawEllipse(QPointF(cx + x * r, cy + y * r), self._DOT_RADIUS, self._DOT_RADIUS)
