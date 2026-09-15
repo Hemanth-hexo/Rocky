@@ -12,7 +12,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from agent.loop import new_conversation, run_turn
+from agent.conversation_store import load_conversation, save_conversation
+from agent.loop import run_turn
 from agent.obsidian import append_daily_log
 from agent.rocky_transform import rocky_transform
 from voice.listen import transcribe
@@ -93,6 +94,7 @@ def handle_turn(
         run_turn(messages)
         reply = rocky_transform(messages[-1]["content"])
         append_daily_log(text, reply)
+        save_conversation(messages)
         on_status("speaking", reply)
         completed = speak(reply, interrupt_event=interrupt_event)
         return not completed
@@ -117,9 +119,10 @@ def run_rocky(on_status: StatusCallback, messages: Optional[list] = None, lock: 
 
     `messages`/`lock` can be supplied to share this conversation with a
     typed-input path (e.g. a GUI text box) running on another thread;
-    otherwise a private conversation is created."""
+    otherwise the last saved conversation is resumed (or a fresh one
+    started, the first time there's nothing to resume)."""
     if messages is None:
-        messages = new_conversation()
+        messages = load_conversation()
 
     state_lock = threading.Lock()
     recorder: Optional[_Recorder] = None

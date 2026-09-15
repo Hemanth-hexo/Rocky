@@ -15,5 +15,10 @@ def _get_model() -> WhisperModel:
 
 
 def transcribe(audio_path: str) -> str:
-    segments, _ = _get_model().transcribe(audio_path)
+    # Without a pinned language, Whisper auto-detects per clip from the
+    # first few seconds of audio — on short or slightly noisy push-to-talk
+    # recordings it sometimes misfires onto an unrelated language (Chinese
+    # is a well-known false-positive for this model family) and transcribes
+    # gibberish in that language instead of the English actually spoken.
+    segments, _ = _get_model().transcribe(audio_path, language="en")
     return " ".join(seg.text.strip() for seg in segments)

@@ -37,7 +37,8 @@ from agent.greeting import generate_greeting, greeting_due, mark_greeted
 from agent.loop import ALL_SCHEMAS, MODEL
 from agent.obsidian import LOG_DIR, VAULT_DIR, append_daily_log, list_notes, read_note
 from agent.rocky_transform import rocky_transform
-from main import handle_turn, new_conversation, run_rocky
+from agent.conversation_store import load_conversation, save_conversation
+from main import handle_turn, run_rocky
 from orb_widget import STATE_COLORS, OrbWidget, ParticleOrbWidget
 from voice.push_to_talk import HOTKEY_LABEL
 from voice.speak import DEFAULT_VOICE, speak
@@ -435,7 +436,7 @@ class RockyWindow(QMainWindow):
         if os.path.exists(_ROCKY_IMAGE_PATH):
             self.setWindowIcon(QIcon(_ROCKY_IMAGE_PATH))
 
-        self.messages = new_conversation()
+        self.messages = load_conversation()
         self.lock = threading.Lock()
 
         central = QWidget()
@@ -529,6 +530,7 @@ class RockyWindow(QMainWindow):
                 return
             self.messages.append({"role": "assistant", "content": reply})
             append_daily_log("(no message — Rocky greeted first)", reply)
+            save_conversation(self.messages)
         self._emit_status("speaking", reply)
         speak(reply)
         self._emit_status("idle", "")
