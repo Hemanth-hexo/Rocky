@@ -57,15 +57,40 @@ def remember(fact: str) -> str:
 def extract_profile_facts(text: str) -> list[str]:
     """One-off model call (same pattern as agent/greeting.py's
     generate_greeting) that pulls durable, standalone facts out of a
-    message worth keeping permanently."""
+    message worth keeping permanently.
+
+    First version of this prompt asked for "1-6" facts and just said
+    "extract durable facts" — tested against a genuinely long, detailed
+    message and it collapsed specific, concrete details into vague
+    LinkedIn-bio-style lines ("Romantic Interests: I have a special
+    someone..."), losing most of what actually mattered. This version asks
+    for as many facts as genuinely apply, explicitly asks to keep concrete
+    detail instead of paraphrasing it away, and calls out that a standing
+    instruction for how Rocky should behave (e.g. "don't assume without
+    evidence") is itself a fact worth saving, not just information."""
     prompt = (
-        "Extract 1-6 short, standalone, durable facts about the user from the message "
-        "below, suitable for a permanent profile note that's loaded into every future "
-        "conversation. Only include things that stay true over time — identity, "
-        "preferences, relationships or situations worth long-term context, ongoing "
-        "projects, habits, values. Leave out anything only relevant to this one exchange. "
-        "Write each fact as one plain line, no numbering, no bullets, no extra commentary "
-        "— just the facts, one per line.\n\nMessage:\n" + text
+        "Extract durable, standalone facts about the user from the message below, for a "
+        "permanent profile note loaded into every future conversation. Extract as many as "
+        "genuinely apply — don't force it into a small fixed number, and for a long or detailed "
+        "message don't over-compress into vague generic phrases. Keep specific, concrete details "
+        "(names, what happened, why it matters) rather than paraphrasing them into a generic "
+        "bio-style line.\n\n"
+        "If the message gives you an instruction for how to talk about or handle a topic in "
+        "future conversations (e.g. \"don't assume X without evidence\", \"always ask me before "
+        "Y\"), extract that as its own fact too — it's a standing rule for you to follow, not "
+        "just information about the user.\n\n"
+        "Only include things that stay true over time — identity, preferences, relationships or "
+        "situations worth long-term context, ongoing projects, habits, values, standing "
+        "instructions to you. Leave out anything only relevant to this one exchange.\n\n"
+        "Write each fact as one plain line, no numbering, no bullets, no extra commentary — just "
+        "the facts, one per line.\n\n"
+        "Example message: \"I'm Sam, a nurse, I work night shifts so don't message me before "
+        "2pm, and my dog Bailey just had surgery so I'm worried about her this week.\"\n"
+        "Example facts:\n"
+        "Name is Sam, works as a nurse\n"
+        "Works night shifts — don't expect a response before 2pm\n"
+        "Has a dog named Bailey who had surgery recently\n\n"
+        "Message:\n" + text
     )
     response = ollama.chat(model=MODEL, messages=[{"role": "user", "content": prompt}])
     content = response["message"]["content"].strip()
