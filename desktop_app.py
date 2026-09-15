@@ -37,6 +37,7 @@ from agent.greeting import generate_greeting, greeting_due, mark_greeted
 from agent.loop import ALL_SCHEMAS, MODEL
 from agent.obsidian import LOG_DIR, VAULT_DIR, append_daily_log, list_notes, read_note
 from agent.profile import read_profile
+from agent.projects import list_projects, read_project
 from agent.rocky_transform import rocky_transform
 from agent.conversation_store import load_conversation, save_conversation
 from main import handle_turn, run_rocky
@@ -429,14 +430,64 @@ class SettingsPage(QWidget):
 
 
 class ProjectsPage(QWidget):
+    """Browses what Rocky is tracking via create_project/add_project_update
+    (agent/projects.py) — one Markdown note per project in the vault. Same
+    list-left/preview-right layout as MemoryPage."""
+
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
-        layout.setAlignment(Qt.AlignCenter)
-        label = QLabel("Projects — coming soon")
-        label.setObjectName("emptyState")
-        label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(label)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        title = QLabel("Projects")
+        title.setObjectName("pageTitle")
+        layout.addWidget(title)
+
+        body = QWidget()
+        body_layout = QHBoxLayout(body)
+        body_layout.setContentsMargins(16, 4, 16, 16)
+        body_layout.setSpacing(12)
+
+        self.project_list = QListWidget()
+        self.project_list.setFixedWidth(180)
+        self.project_list.itemClicked.connect(self._on_select)
+        body_layout.addWidget(self.project_list)
+
+        self.preview = QTextEdit()
+        self.preview.setObjectName("infoPane")
+        self.preview.setReadOnly(True)
+        body_layout.addWidget(self.preview, 1)
+
+        layout.addWidget(body, 1)
+        self._loaded = False
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        if not self._loaded:
+            self._reload()
+            self._loaded = True
+
+    def _reload(self) -> None:
+        try:
+            listing = list_projects()
+            names = [n for n in listing.splitlines() if n.strip()]
+        except Exception as e:
+            self.preview.setPlainText(f"Couldn't reach the Obsidian vault:\n{e}")
+            return
+        if not names or names == ["(no projects yet)"]:
+            self.preview.setPlainText("No projects tracked yet — Rocky adds one when you mention something you're building.")
+            return
+        for name in names:
+            self.project_list.addItem(QListWidgetItem(name))
+        self.project_list.setCurrentRow(0)
+        self._on_select(self.project_list.item(0))
+
+    def _on_select(self, item: QListWidgetItem) -> None:
+        try:
+            content = read_project(item.text())
+        except Exception as e:
+            content = f"Couldn't read this project:\n{e}"
+        self.preview.setPlainText(content)
 
 
 class RockyWindow(QMainWindow):
